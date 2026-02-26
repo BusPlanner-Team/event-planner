@@ -1,0 +1,277 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if event else 'New' }} Event{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ 'Edit Event' if event else 'Create New Event' }}</h1>
+    <p>{{ 'Update event details' if event else 'Enter event info, select deliverables, and set your timeline' }}</p>
+</div>
+
+{% if compressed is defined and compressed %}
+<div class="timeline-warning">
+    <span class="timeline-warning-icon">⚠️</span>
+    <span>This event is less than 6 weeks away — the suggested timeline has been compressed. Review dates carefully.</span>
+</div>
+{% endif %}
+
+<form method="POST" class="form-card form-card-wide">
+    <!-- Section 1: Event Details -->
+    <div class="form-section">
+        <h3>Event Details</h3>
+        <div class="form-row">
+            <div class="form-group form-group-wide">
+                <label>Event Name</label>
+                <input type="text" name="name" value="{{ event.name if event else '' }}" required>
+            </div>
+            <div class="form-group">
+                <label>Event Type</label>
+                <select name="event_type" id="event-type" onchange="toggleWebinarNote()">
+                    {% for t in ['conference', 'tradeshow', 'webinar', 'workshop', 'meetup', 'lunch_and_learn', 'other'] %}
+                    <option value="{{ t }}" {% if event and event.event_type == t %}selected{% endif %}>{{ t|event_type_label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Event Date</label>
+                <input type="text" name="event_date" id="event-date" class="flatpickr-date"
+                       value="{{ event.event_date[:10] if event and event.event_date else '' }}" required
+                       placeholder="YYYY-MM-DD">
+            </div>
+            <div class="form-group">
+                <label>Location</label>
+                <input type="text" name="location" value="{{ event.location if event else '' }}" placeholder="City, Venue, or Virtual">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Start Time</label>
+                <input type="text" name="start_time" id="start-time" class="flatpickr-time"
+                       value="{{ event.start_time if event and event.start_time else '' }}"
+                       placeholder="HH:MM (e.g. 09:00)">
+                <span class="form-hint">Optional. Required for Outlook calendar invite.</span>
+            </div>
+            <div class="form-group">
+                <label>End Time</label>
+                <input type="text" name="end_time" id="end-time" class="flatpickr-time"
+                       value="{{ event.end_time if event and event.end_time else '' }}"
+                       placeholder="HH:MM (e.g. 17:00)">
+                <span class="form-hint">Optional. Required for Outlook calendar invite.</span>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Description</label>
+            <textarea name="description" rows="3">{{ event.description if event else '' }}</textarea>
+        </div>
+        <div class="form-group">
+            <label>Slack Channel ID</label>
+            <input type="text" name="slack_channel_id"
+                   value="{{ event.slack_channel_id if event and event.slack_channel_id else '' }}"
+                   placeholder="C0XXXXXXXXX">
+            <span class="form-hint">Slack channel for this event's notifications and AI summaries. Falls back to global channel if empty.</span>
+        </div>
+    </div>
+
+    {% if not event %}
+    <hr class="form-divider">
+
+    <!-- Section 2: Deliverables -->
+    <div class="form-section">
+        <h3>Deliverables</h3>
+        <p class="form-section-desc">Select the deliverables needed for this event</p>
+
+        <div class="checkbox-group">
+            <label class="checkbox-label">
+                <input type="checkbox" name="deliverable_landing_page" value="1" id="cb-landing" checked>
+                <span>Landing Page</span>
+            </label>
+            <label class="checkbox-label">
+                <input type="checkbox" name="deliverable_email" value="1" id="cb-email" checked onchange="toggleEmailCount()">
+                <span>Emails</span>
+            </label>
+            <div id="email-count-wrap" class="inline-field">
+                <label>How many emails?</label>
+                <input type="number" name="email_count" id="email-count" value="2" min="1" max="10" style="width: 80px;">
+            </div>
+            <label class="checkbox-label">
+                <input type="checkbox" name="deliverable_calendar" value="1" id="cb-calendar" checked>
+                <span>Calendar Entry</span>
+            </label>
+        </div>
+
+        <div id="webinar-note" class="webinar-note">
+            📹 For webinar events, post-event tasks will be auto-created: <strong>Edit YouTube Video</strong> and <strong>Send Thank You Email (with video)</strong>, both due 2 days after the event.
+        </div>
+    </div>
+
+    <hr class="form-divider">
+
+    <!-- Section 3: Timeline -->
+    <div class="form-section">
+        <h3>Suggested Timeline</h3>
+        <p class="form-section-desc">Auto-generated based on event date. Adjust as needed.</p>
+
+        <div id="timeline-preview">
+            <p class="meta-light">Set an event date and select deliverables to see the suggested timeline.</p>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">{{ 'Save Changes' if event else 'Create Event' }}</button>
+        <a href="{{ url_for('event_detail', event_id=event.id) if event else url_for('dashboard') }}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleEmailCount() {
+    const wrap = document.getElementById('email-count-wrap');
+    const cb = document.getElementById('cb-email');
+    wrap.style.display = cb.checked ? 'flex' : 'none';
+}
+
+function toggleWebinarNote() {
+    const note = document.getElementById('webinar-note');
+    const typeSelect = document.getElementById('event-type');
+    if (note && typeSelect) {
+        if (typeSelect.value === 'webinar') {
+            note.classList.add('visible');
+        } else {
+            note.classList.remove('visible');
+        }
+    }
+}
+
+function updateTimeline() {
+    const dateInput = document.getElementById('event-date');
+    if (!dateInput || !dateInput.value) return;
+
+    const eventDate = new Date(dateInput.value + 'T00:00:00');
+    if (isNaN(eventDate.getTime())) return;
+
+    const types = [];
+    if (document.getElementById('cb-landing')?.checked) types.push('landing_page');
+    if (document.getElementById('cb-email')?.checked) types.push('email');
+    if (document.getElementById('cb-calendar')?.checked) types.push('calendar_entry');
+
+    if (types.length === 0) {
+        document.getElementById('timeline-preview').innerHTML =
+            '<p class="meta-light">Select at least one deliverable to see the timeline.</p>';
+        return;
+    }
+
+    const emailCount = parseInt(document.getElementById('email-count')?.value || '2');
+    const timeline = suggestTimeline(eventDate, types, emailCount);
+
+    let html = '';
+
+    // Check if timeline is compressed
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const daysUntil = Math.floor((eventDate - today) / (24 * 60 * 60 * 1000));
+    if (daysUntil < 42 && daysUntil > 0) {
+        html += '<div class="timeline-warning"><span class="timeline-warning-icon">⚠️</span>';
+        html += `<span>Event is ${daysUntil} days away — timeline has been compressed.</span></div>`;
+    }
+
+    html += '<table class="leads-table"><thead><tr><th>Deliverable</th><th>Suggested Due Date</th></tr></thead><tbody>';
+    timeline.forEach((item, i) => {
+        const dateStr = item.due_date.toISOString().slice(0, 10);
+        html += `<tr>
+            <td><span class="type-icon type-${item.type}"></span>${item.label}</td>
+            <td><input type="text" name="timeline_${i}_due_date" value="${dateStr}" class="flatpickr-date">
+                <input type="hidden" name="timeline_${i}_type" value="${item.type}">
+                <input type="hidden" name="timeline_${i}_label" value="${item.label}">
+            </td>
+        </tr>`;
+    });
+    html += `<input type="hidden" name="timeline_count" value="${timeline.length}">`;
+    html += '</tbody></table>';
+    document.getElementById('timeline-preview').innerHTML = html;
+
+    // Re-initialize flatpickr on the new date inputs
+    reinitFlatpickr(document.getElementById('timeline-preview'));
+}
+
+function suggestTimeline(eventDate, types, emailCount) {
+    const items = [];
+    const day = 24 * 60 * 60 * 1000;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today.getTime() + day);
+    const daysUntil = Math.floor((eventDate - today) / day);
+
+    // Compression factor for events closer than 6 weeks
+    let compress = 1.0;
+    if (daysUntil < 14 && daysUntil > 0) {
+        compress = 0; // will stagger from today
+    } else if (daysUntil < 42 && daysUntil > 0) {
+        compress = daysUntil / 42;
+    }
+
+    function clampDate(d) {
+        return d < tomorrow ? new Date(tomorrow.getTime()) : d;
+    }
+
+    function offsetDate(standardDaysBeforeEvent) {
+        if (compress === 0) {
+            // Stagger from today for very close events
+            return clampDate(new Date(today.getTime() + day));
+        }
+        const adjustedDays = Math.round(standardDaysBeforeEvent * compress);
+        return clampDate(new Date(eventDate.getTime() - adjustedDays * day));
+    }
+
+    if (types.includes('landing_page')) {
+        items.push({type: 'landing_page', label: 'Landing Page',
+            due_date: offsetDate(42), sort: 0});
+    }
+    if (types.includes('calendar_entry')) {
+        items.push({type: 'calendar_entry', label: 'Calendar Entry',
+            due_date: offsetDate(28), sort: 1});
+    }
+    if (types.includes('email')) {
+        const firstOffset = 28;
+        const lastOffset = 7;
+        if (emailCount === 1) {
+            items.push({type: 'email', label: 'Event Email', due_date: offsetDate(firstOffset), sort: 10});
+        } else if (emailCount === 2) {
+            items.push({type: 'email', label: 'First Email', due_date: offsetDate(firstOffset), sort: 10});
+            items.push({type: 'email', label: 'Reminder Email', due_date: offsetDate(lastOffset), sort: 11});
+        } else {
+            for (let i = 0; i < emailCount; i++) {
+                const offset = emailCount > 1 ?
+                    firstOffset - (firstOffset - lastOffset) * i / (emailCount - 1) :
+                    firstOffset;
+                items.push({type: 'email', label: `Email ${i + 1}`, due_date: offsetDate(Math.round(offset)), sort: 10 + i});
+            }
+        }
+    }
+
+    // Stagger if compressed to 0 (all dates are same)
+    if (compress === 0) {
+        items.sort((a, b) => a.sort - b.sort);
+        items.forEach((item, i) => {
+            item.due_date = clampDate(new Date(today.getTime() + (i + 1) * day));
+        });
+    }
+
+    items.sort((a, b) => a.due_date - b.due_date);
+    return items;
+}
+
+// Auto-update timeline when inputs change
+document.getElementById('event-date')?.addEventListener('change', updateTimeline);
+document.getElementById('cb-landing')?.addEventListener('change', updateTimeline);
+document.getElementById('cb-email')?.addEventListener('change', updateTimeline);
+document.getElementById('cb-calendar')?.addEventListener('change', updateTimeline);
+document.getElementById('email-count')?.addEventListener('change', updateTimeline);
+
+toggleEmailCount();
+toggleWebinarNote();
+updateTimeline();
+</script>
+{% endblock %}

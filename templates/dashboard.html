@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="header-row">
+        <div>
+            <h1>Event Dashboard</h1>
+            <p>{{ events|length }} event{{ 's' if events|length != 1 }} tracked</p>
+        </div>
+        <div class="header-actions">
+            <a href="{{ url_for('event_new') }}" class="btn btn-primary">+ New Event</a>
+        </div>
+    </div>
+</div>
+
+{% if events %}
+<div class="card-grid">
+    {% for event in events %}
+    <div class="card event-card">
+        <div class="card-header-row">
+            <h3><a href="{{ url_for('event_detail', event_id=event.id) }}">{{ event.name }}</a></h3>
+            <span class="status-pill status-{{ event.status }}">{{ event.status|replace('_', ' ')|title }}</span>
+        </div>
+        <div class="card-meta">
+            <div class="meta-row">
+                <span class="meta-icon">&#128197;</span>
+                <span>{{ event.event_date|et_date }}<span class="tz-label">ET</span></span>
+            </div>
+            {% if event.location %}
+            <div class="meta-row">
+                <span class="meta-icon">&#128205;</span>
+                <span>{{ event.location }}</span>
+            </div>
+            {% endif %}
+            <div class="meta-row">
+                <span class="meta-icon">&#127991;</span>
+                <span>{{ event.event_type|event_type_label }}</span>
+            </div>
+        </div>
+        <div class="card-footer">
+            {% set stats = event_stats[event.id] %}
+            {% set total_items = stats.total + stats.checklist_total %}
+            {% set done_items = stats.completed + stats.checklist_done %}
+            <span class="meta-light">{{ done_items }}/{{ total_items }} items done</span>
+            {% if stats.overdue > 0 %}
+            <span class="badge badge-error">{{ stats.overdue }} overdue</span>
+            {% endif %}
+            {% if total_items > 0 %}
+            <div class="progress-bar-wrap">
+                <div class="progress-bar" style="width: {{ (done_items / total_items * 100)|int }}%"></div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state card">
+    <p>No events yet. Create your first event to get started.</p>
+    <a href="{{ url_for('event_new') }}" class="btn btn-primary" style="margin-top: 1rem;">+ New Event</a>
+</div>
+{% endif %}
+{% endblock %}

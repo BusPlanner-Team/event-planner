@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+{% block title %}Email Review — {{ task.title }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="header-row">
+        <div>
+            <p class="meta-light" style="margin-bottom: 0.25rem;">
+                <a href="{{ url_for('event_detail', event_id=task.event_id) }}">{{ task.event_name }}</a>
+                &rsaquo; <a href="{{ url_for('task_detail', event_id=task.event_id, task_id=task.id) }}">{{ task.title }}</a>
+            </p>
+            <h1>Email Copy Review</h1>
+        </div>
+        <div class="header-actions">
+            <span class="status-pill status-{{ task.status }}">{{ task.status|replace('_', ' ')|title }}</span>
+        </div>
+    </div>
+</div>
+
+<div class="email-review-grid">
+    <!-- Left: Editor -->
+    <div>
+        <div class="card">
+            <h3 style="font-size: 0.95rem; margin-bottom: 1rem;">Email Content</h3>
+            <form id="email-form" onsubmit="saveEmailDraft(event)">
+                <div class="form-group">
+                    <label>Subject Line</label>
+                    <input type="text" name="subject_line" id="subject-line"
+                           value="{{ email_copy.subject_line if email_copy else '' }}"
+                           placeholder="Enter email subject line">
+                </div>
+                <div class="form-group">
+                    <label>HTML Content</label>
+                    <textarea name="html_content" id="html-content" rows="20"
+                              placeholder="Paste or type email HTML content here">{{ email_copy.html_content if email_copy else '' }}</textarea>
+                </div>
+                <div class="form-actions" style="border: none; padding-top: 0.75rem; margin-top: 0;">
+                    <button type="submit" class="btn btn-primary">Save Draft</button>
+                    <button type="button" class="btn btn-secondary" onclick="previewEmail()">Preview</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Right: MailChimp + Approval -->
+    <div>
+        <!-- MailChimp Integration -->
+        <div class="card" style="margin-bottom: 1rem;">
+            <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem;">MailChimp</h3>
+
+            {% if email_copy and email_copy.mailchimp_campaign_id %}
+            <p style="font-size: 0.85rem; margin-bottom: 0.5rem;">
+                Linked Campaign: <code>{{ email_copy.mailchimp_campaign_id }}</code>
+            </p>
+            {% if email_copy.last_pulled_at %}
+            <p class="meta-light">Last pulled: {{ email_copy.last_pulled_at|et_format }}<span class="tz-label">ET</span></p>
+            {% endif %}
+            {% if email_copy.last_pushed_at %}
+            <p class="meta-light">Last pushed: {{ email_copy.last_pushed_at|et_format }}<span class="tz-label">ET</span></p>
+            {% endif %}
+            {% endif %}
+
+            <div class="form-group" style="margin-top: 0.75rem;">
+                <label>Campaign ID</label>
+                <input type="text" id="mailchimp-campaign-id"
+                       value="{{ email_copy.mailchimp_campaign_id if email_copy else '' }}"
+                       placeholder="Enter MailChimp campaign ID">
+            </div>
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <button class="btn btn-secondary btn-small" onclick="pullFromMailchimp()">Pull from MailChimp</button>
+                <button class="btn btn-primary btn-small" onclick="pushToMailchimp()">Push to MailChimp</button>
+            </div>
+            <div id="mailchimp-status" style="margin-top: 0.5rem;"></div>
+        </div>
+
+        <!-- Campaigns List -->
+        <div class="card" style="margin-bottom: 1rem;">
+            <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem;">Recent Campaigns</h3>
+            <button class="btn btn-secondary btn-small" onclick="loadCampaigns()" style="margin-bottom: 0.75rem;">Load Campaigns</button>
+            <div id="campaigns-list"></div>
+        </div>
+
+        <!-- Approval Status -->
+        {% if active_approval and task.status != 'completed' %}
+        <div class="card">
+            <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem;">Approval</h3>
+            <p style="font-size: 0.85rem; margin-bottom: 0.75rem;">
+                Current Step: <strong>{{ active_approval.step_label }}</strong><br>
+                Waiting on: {{ active_approval.approver_name or 'Unassigned' }}
+            </p>
+            <div style="display: flex; gap: 0.5rem;">
+                <button class="btn btn-approve btn-small" onclick="approveStep({{ active_approval.id }})">Approve</button>
+                <button class="btn btn-danger btn-small" onclick="rejectFromEmail({{ active_approval.id }})">Reject</button>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Preview Modal -->
+<div id="preview-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Email Preview</h3>
+            <button class="btn btn-secondary btn-small" onclick="closePreview()">Close</button>
+        </div>
+        <div class="modal-body">
+            <p style="font-weight: 600; margin-bottom: 0.5rem;" id="preview-subject"></p>
+            <iframe id="preview-frame" style="width: 100%; height: 500px; border: 1px solid var(--border); border-radius: 4px;"></iframe>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const emailCopyId = {{ email_copy.id if email_copy else 'null' }};
+
+async function saveEmailDraft(e) {
+    e.preventDefault();
+    const data = {
+        subject_line: document.getElementById('subject-line').value,
+        html_content: document.getElementById('html-content').value,
+    };
+    const url = emailCopyId ? `/api/email-copy/${emailCopyId}` : `/api/email-copy/create/{{ task.id }}`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data),
+    });
+    if (resp.ok) {
+        showStatus('mailchimp-status', 'Draft saved!', true);
+        if (!emailCopyId) location.reload();
+    } else {
+        showStatus('mailchimp-status', 'Failed to save draft', false);
+    }
+}
+
+function previewEmail() {
+    const subject = document.getElementById('subject-line').value;
+    const html = document.getElementById('html-content').value;
+    document.getElementById('preview-subject').textContent = 'Subject: ' + subject;
+    const frame = document.getElementById('preview-frame');
+    frame.srcdoc = html || '<p style="padding: 2rem; color: #666;">No content to preview.</p>';
+    document.getElementById('preview-modal').style.display = 'flex';
+}
+
+function closePreview() {
+    document.getElementById('preview-modal').style.display = 'none';
+}
+
+async function pullFromMailchimp() {
+    const campaignId = document.getElementById('mailchimp-campaign-id').value.trim();
+    if (!campaignId) { alert('Enter a campaign ID first.'); return; }
+    showStatus('mailchimp-status', 'Pulling...', true);
+    const url = emailCopyId ? `/api/email-copy/${emailCopyId}/pull-mailchimp` : `/api/email-copy/create/{{ task.id }}`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({campaign_id: campaignId, pull: true}),
+    });
+    if (resp.ok) {
+        const data = await resp.json();
+        if (data.html) document.getElementById('html-content').value = data.html;
+        if (data.subject_line) document.getElementById('subject-line').value = data.subject_line;
+        showStatus('mailchimp-status', 'Pulled successfully!', true);
+    } else {
+        showStatus('mailchimp-status', 'Pull failed', false);
+    }
+}
+
+async function pushToMailchimp() {
+    const campaignId = document.getElementById('mailchimp-campaign-id').value.trim();
+    if (!campaignId) { alert('Enter a campaign ID first.'); return; }
+    if (!emailCopyId) { alert('Save the draft first.'); return; }
+    const subjectLine = document.getElementById('subject-line').value.trim();
+    showStatus('mailchimp-status', 'Pushing...', true);
+    const resp = await fetch(`/api/email-copy/${emailCopyId}/push-mailchimp`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({campaign_id: campaignId, subject_line: subjectLine}),
+    });
+    if (resp.ok) {
+        showStatus('mailchimp-status', 'Pushed to MailChimp!', true);
+    } else {
+        showStatus('mailchimp-status', 'Push failed', false);
+    }
+}
+
+async function loadCampaigns() {
+    const listEl = document.getElementById('campaigns-list');
+    listEl.innerHTML = '<span class="spinner"></span>';
+    const resp = await fetch('/api/mailchimp/campaigns');
+    if (resp.ok) {
+        const data = await resp.json();
+        if (data.campaigns && data.campaigns.length > 0) {
+            let html = '<div class="sync-log-list">';
+            data.campaigns.slice(0, 10).forEach(c => {
+                const name = c.settings?.title || c.id;
+                const subject = c.settings?.subject_line || '';
+                const preview = c.settings?.preview_text || '';
+                const previewTrunc = preview.length > 60 ? preview.slice(0, 60) + '...' : preview;
+                html += `<div class="sync-log-item" style="cursor: pointer; padding: 0.5rem 0;" onclick="selectCampaign('${c.id}')">
+                    <div>
+                        <span class="status-dot-inline status-dot-${c.status === 'sent' ? 'sent' : 'scheduled'}"></span>
+                        <strong>${name}</strong> <span class="meta-light">(${c.status})</span>
+                    </div>
+                    ${subject ? `<div style="font-size: 0.8rem; color: var(--navy); margin-left: 1rem;">Subject: ${subject}</div>` : ''}
+                    ${previewTrunc ? `<div style="font-size: 0.75rem; color: var(--text-light); margin-left: 1rem; font-style: italic;">${previewTrunc}</div>` : ''}
+                </div>`;
+            });
+            html += '</div>';
+            listEl.innerHTML = html;
+        } else {
+            listEl.innerHTML = '<p class="meta-light">No campaigns found.</p>';
+        }
+    } else {
+        listEl.innerHTML = '<p class="meta-light">Failed to load campaigns. Check MailChimp settings.</p>';
+    }
+}
+
+function selectCampaign(id) {
+    document.getElementById('mailchimp-campaign-id').value = id;
+}
+
+async function approveStep(approvalId) {
+    const resp = await fetch(`/api/approval/${approvalId}/approve`, {method: 'POST'});
+    if (resp.ok) location.reload();
+}
+
+async function rejectFromEmail(approvalId) {
+    const feedback = prompt('Rejection feedback:');
+    if (!feedback) return;
+    const resp = await fetch(`/api/approval/${approvalId}/reject`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({feedback}),
+    });
+    if (resp.ok) location.reload();
+}
+
+function showStatus(elId, msg, success) {
+    const el = document.getElementById(elId);
+    el.innerHTML = `<span class="test-status ${success ? 'test-success' : 'test-error'}">${msg}</span>`;
+    setTimeout(() => { el.innerHTML = ''; }, 3000);
+}
+</script>
+{% endblock %}

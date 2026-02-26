@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block title %}{{ task.title }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="header-row">
+        <div>
+            <p class="meta-light" style="margin-bottom: 0.25rem;">
+                <a href="{{ url_for('event_detail', event_id=task.event_id) }}">{{ task.event_name }}</a>
+                &rsaquo; {{ task.deliverable_label }}
+            </p>
+            <h1>{{ task.title }}</h1>
+        </div>
+        <div class="header-actions">
+            {% if task.deliverable_type == 'email' %}
+            <a href="{{ url_for('email_review', event_id=task.event_id, task_id=task.id) }}" class="btn btn-secondary btn-small">Review Email Copy</a>
+            {% endif %}
+            <span class="status-pill status-{{ task.status }}">{{ task.status|replace('_', ' ')|title }}</span>
+        </div>
+    </div>
+</div>
+
+<div class="detail-grid">
+    <div>
+        <!-- Approval Pipeline -->
+        <div class="card" style="margin-bottom: 1rem;">
+            <h3 style="font-size: 0.95rem; margin-bottom: 1rem;">Approval Pipeline</h3>
+            <div class="approval-pipeline">
+                {% for step in approvals %}
+                <div class="pipeline-step pipeline-step-{{ step.status }}">
+                    <div class="pipeline-dot">
+                        {% if step.status == 'approved' %}&#10003;{% elif step.status == 'rejected' %}&#10007;{% elif step.status == 'active' %}{{ step.step_order }}{% else %}{{ step.step_order }}{% endif %}
+                    </div>
+                    <div class="pipeline-info">
+                        <div class="pipeline-label">
+                            {{ step.step_label }}
+                            {% if step.status == 'approved' %}
+                            <button class="btn-undo" onclick="unapproveStep({{ step.id }})" title="Undo approval">Undo</button>
+                            {% endif %}
+                        </div>
+                        <div class="pipeline-assignee">
+                            {% if step.approver_name %}{{ step.approver_name }}{% else %}Unassigned{% endif %}
+                        </div>
+                        {% if step.feedback %}
+                        <div class="pipeline-feedback">
+                            "{{ step.feedback }}"
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% if not loop.last %}
+                <div class="pipeline-connector"></div>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Action Area (for active step) -->
+        {% if active_approval %}
+        <div class="card" style="margin-bottom: 1rem;">
+            <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem;">
+                Current Step: {{ active_approval.step_label }}
+            </h3>
+            <p style="font-size: 0.85rem; color: var(--text-light); margin-bottom: 1rem;">
+                Waiting on: {{ active_approval.approver_name or 'Unassigned' }}
+            </p>
+            <div class="approval-actions">
+                <button class="btn btn-approve" onclick="approveStep({{ active_approval.id }})">Approve</button>
+                <button class="btn btn-danger" onclick="showRejectForm()">Reject</button>
+            </div>
+            <div id="reject-form" style="display: none; margin-top: 1rem;">
+                <div class="form-group">
+                    <label>Feedback (required)</label>
+                    <textarea id="reject-feedback" rows="3" placeholder="Explain what needs to change..."></textarea>
+                </div>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-danger btn-small" onclick="rejectStep({{ active_approval.id }})">Send Rejection</button>
+                    <button class="btn btn-secondary btn-small" onclick="hideRejectForm()">Cancel</button>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Mark Complete (for leads) -->
+        {% if task.status != 'completed' and can_complete %}
+        <div class="card">
+            <h3 style="font-size: 0.95rem; margin-bottom: 0.5rem;">Complete Task</h3>
+            <p style="font-size: 0.85rem; color: var(--text-light); margin-bottom: 0.75rem;">
+                Mark this task as complete to stop all future notifications.
+            </p>
+            <button class="btn btn-approve" onclick="completeTask({{ task.id }})">Mark as Complete</button>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Right column: Task Info -->
+    <div>
+        <div class="card" style="margin-bottom: 1rem;">
+            <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem;">Task Info</h3>
+            <dl class="info-list">
+                <dt>Deliverable</dt>
+                <dd>{{ task.deliverable_label }}</dd>
+                <dt>Type</dt>
+                <dd>{{ task.deliverable_type|replace('_', ' ')|title }}</dd>
+                <dt>Assignee</dt>
+                <dd>
+                    {% if task.assignee_name %}
+                        {{ task.assignee_name }}
+                    {% else %}
+                        <form onsubmit="assignFromDetail(event, {{ task.id }})" style="display: inline;">
+                            <select name="assignee_id" required style="padding: 0.3rem; font-size: 0.8rem;">
+                                <option value="">Assign...</option>
+                                {% for member in team_members %}
+                                <option value="{{ member.id }}">{{ member.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit" class="btn btn-primary btn-small">Assign</button>
+                        </form>
+                    {% endif %}
+                </dd>
+                <dt>Due Date</dt>
+                <dd>{{ task.due_date|et_date }}<span class="tz-label">ET</span></dd>
+                <dt>Event Date</dt>
+                <dd>{{ task.event_date|et_date }}<span class="tz-label">ET</span></dd>
+            </dl>
+            {% if task.description %}
+            <div class="info-description">
+                <h4>Description</h4>
+                <p style="font-size: 0.85rem;">{{ task.description }}</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function approveStep(approvalId) {
+    const resp = await fetch(`/api/approval/${approvalId}/approve`, {method: 'POST'});
+    if (resp.ok) location.reload();
+    else {
+        const err = await resp.json();
+        alert(err.error || 'Failed to approve');
+    }
+}
+
+async function unapproveStep(approvalId) {
+    if (!confirm('Undo this approval? Later steps will be reset to pending.')) return;
+    const resp = await fetch(`/api/approval/${approvalId}/unapprove`, {method: 'POST'});
+    if (resp.ok) location.reload();
+    else {
+        const err = await resp.json();
+        alert(err.error || 'Failed to undo approval');
+    }
+}
+
+function showRejectForm() {
+    document.getElementById('reject-form').style.display = 'block';
+}
+
+function hideRejectForm() {
+    document.getElementById('reject-form').style.display = 'none';
+}
+
+async function rejectStep(approvalId) {
+    const feedback = document.getElementById('reject-feedback').value.trim();
+    if (!feedback) {
+        alert('Please provide feedback for the rejection.');
+        return;
+    }
+    const resp = await fetch(`/api/approval/${approvalId}/reject`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({feedback}),
+    });
+    if (resp.ok) location.reload();
+    else {
+        const err = await resp.json();
+        alert(err.error || 'Failed to reject');
+    }
+}
+
+async function completeTask(taskId) {
+    if (!confirm('Mark this task as complete? This will stop all future notifications.')) return;
+    const resp = await fetch(`/api/task/${taskId}/complete`, {method: 'POST'});
+    if (resp.ok) location.reload();
+    else {
+        const err = await resp.json();
+        alert(err.error || 'Failed to complete');
+    }
+}
+
+async function assignFromDetail(e, taskId) {
+    e.preventDefault();
+    const form = e.target;
+    const assigneeId = form.assignee_id.value;
+    if (!assigneeId) return;
+    const resp = await fetch(`/api/task/${taskId}/assign`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({assignee_id: parseInt(assigneeId)}),
+    });
+    if (resp.ok) location.reload();
+    else {
+        const err = await resp.json();
+        alert(err.error || 'Failed to assign');
+    }
+}
+</script>
+{% endblock %}

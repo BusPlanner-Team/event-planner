@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Settings</h1>
+    <p>Manage your team and integrations</p>
+</div>
+
+<!-- Team Members -->
+<div class="section">
+    <div class="section-header-row">
+        <h2>Team Members</h2>
+        <button class="btn btn-primary btn-small" onclick="toggleAddMember()">+ Add Member</button>
+    </div>
+
+    <div id="add-member-form" class="card" style="display: none; margin-bottom: 1rem;">
+        <form onsubmit="addTeamMember(event)">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Name</label>
+                    <input type="text" name="name" required>
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="text" name="email" required>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Slack User ID</label>
+                    <input type="text" name="slack_user_id" placeholder="U0XXXXXXXXX">
+                    <span class="form-hint">Find in Slack profile → More → Copy member ID</span>
+                </div>
+                <div class="form-group">
+                    <label>Role</label>
+                    <select name="role">
+                        <option value="associate">Associate</option>
+                        <option value="lead">Lead</option>
+                        <option value="director">Director</option>
+                        <option value="ceo">CEO</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-actions" style="border: none; padding-top: 0.5rem; margin-top: 0.5rem;">
+                <button type="submit" class="btn btn-primary btn-small">Save Member</button>
+                <button type="button" class="btn btn-secondary btn-small" onclick="toggleAddMember()">Cancel</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="leads-table-wrap">
+        <table class="leads-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Slack ID</th>
+                    <th>Role</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for member in team_members %}
+                <tr>
+                    <td>{{ member.name }}</td>
+                    <td class="email-cell">{{ member.email }}</td>
+                    <td><code>{{ member.slack_user_id or '—' }}</code></td>
+                    <td><span class="badge badge-role">{{ member.role }}</span></td>
+                    <td class="actions-cell">
+                        <button class="btn btn-danger btn-small" onclick="removeMember({{ member.id }}, '{{ member.name }}')">Remove</button>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5" style="text-align: center; color: var(--text-light); padding: 2rem;">
+                        No team members yet. Add your first team member above.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Integrations -->
+<form method="POST" class="settings-form">
+    <div class="settings-section">
+        <div class="settings-section-header">
+            <h3>Slack</h3>
+            <span id="slack-status"></span>
+        </div>
+        <div class="card">
+            <div class="form-group">
+                <label>Bot Token</label>
+                <input type="password" name="slack_bot_token"
+                       value="{{ slack_bot_token_masked }}"
+                       placeholder="xoxb-...">
+            </div>
+            <div class="form-group">
+                <label>Notification Channel ID</label>
+                <input type="text" name="slack_notification_channel"
+                       value="{{ slack_notification_channel }}"
+                       placeholder="C0XXXXXXXXX">
+                <span class="form-hint">Default channel where task reminders will be posted (events can override with their own channel)</span>
+            </div>
+            <button type="button" class="btn btn-secondary btn-small" onclick="testSlack()">
+                Test Connection
+            </button>
+        </div>
+    </div>
+
+    <div class="settings-section">
+        <div class="settings-section-header">
+            <h3>MailChimp</h3>
+            <span id="mailchimp-status"></span>
+        </div>
+        <div class="card">
+            <div class="form-group">
+                <label>API Key</label>
+                <input type="password" name="mailchimp_api_key"
+                       value="{{ mailchimp_api_key_masked }}"
+                       placeholder="xxxxxxxxxxxxx-us21">
+            </div>
+            <button type="button" class="btn btn-secondary btn-small" onclick="testMailchimp()">
+                Test Connection
+            </button>
+        </div>
+    </div>
+
+    <div class="settings-section">
+        <div class="settings-section-header">
+            <h3>Anthropic (Claude AI)</h3>
+            <span id="anthropic-status"></span>
+        </div>
+        <div class="card">
+            <div class="form-group">
+                <label>API Key</label>
+                <input type="password" name="anthropic_api_key"
+                       value="{{ anthropic_api_key_masked }}"
+                       placeholder="sk-ant-...">
+                <span class="form-hint">Required for Slack channel AI summaries. Uses Claude 3.5 Haiku.</span>
+            </div>
+            <button type="button" class="btn btn-secondary btn-small" onclick="testAnthropic()">
+                Test Connection
+            </button>
+        </div>
+    </div>
+
+    <div class="settings-section">
+        <div class="settings-section-header">
+            <h3>Outlook (Microsoft 365)</h3>
+            <span id="outlook-status"></span>
+        </div>
+        <div class="card">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Azure Tenant ID</label>
+                    <input type="password" name="outlook_tenant_id"
+                           value="{{ outlook_tenant_id_masked }}"
+                           placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                </div>
+                <div class="form-group">
+                    <label>Client ID</label>
+                    <input type="password" name="outlook_client_id"
+                           value="{{ outlook_client_id_masked }}"
+                           placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Client Secret</label>
+                <input type="password" name="outlook_client_secret"
+                       value="{{ outlook_client_secret_masked }}"
+                       placeholder="Your client secret value">
+            </div>
+            <div class="form-group">
+                <label>Organizer Email</label>
+                <input type="text" name="outlook_organizer_email"
+                       value="{{ outlook_organizer_email }}"
+                       placeholder="farzan.hussain@busplanner.com">
+                <span class="form-hint">Calendar events will be created in this user's Outlook calendar.</span>
+            </div>
+            <div class="form-group">
+                <label>Default Attendees</label>
+                <input type="text" name="outlook_default_attendees"
+                       value="{{ outlook_default_attendees }}"
+                       placeholder="email1@company.com,email2@company.com">
+                <span class="form-hint">Comma-separated. These people are invited to every event by default.</span>
+            </div>
+            <button type="button" class="btn btn-secondary btn-small" onclick="testOutlook()">
+                Test Connection
+            </button>
+        </div>
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save Settings</button>
+    </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleAddMember() {
+    const form = document.getElementById('add-member-form');
+    form.style.display = form.style.display === 'none' ? 'block' : 'none';
+}
+
+async function addTeamMember(e) {
+    e.preventDefault();
+    const form = e.target;
+    const data = Object.fromEntries(new FormData(form));
+    const resp = await fetch('/api/team-member', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data),
+    });
+    if (resp.ok) {
+        location.reload();
+    } else {
+        const err = await resp.json();
+        alert(err.error || 'Failed to add member');
+    }
+}
+
+async function removeMember(id, name) {
+    if (!confirm(`Remove ${name} from the team?`)) return;
+    const resp = await fetch(`/api/team-member/${id}/delete`, {method: 'POST'});
+    if (resp.ok) location.reload();
+}
+
+async function testSlack() {
+    const statusEl = document.getElementById('slack-status');
+    statusEl.innerHTML = '<span class="spinner"></span>';
+    const resp = await fetch('/api/test-slack', {method: 'POST'});
+    const data = await resp.json();
+    statusEl.innerHTML = data.success
+        ? '<span class="test-status test-success">Connected</span>'
+        : '<span class="test-status test-error">Failed</span>';
+}
+
+async function testMailchimp() {
+    const statusEl = document.getElementById('mailchimp-status');
+    statusEl.innerHTML = '<span class="spinner"></span>';
+    const resp = await fetch('/api/test-mailchimp', {method: 'POST'});
+    const data = await resp.json();
+    statusEl.innerHTML = data.success
+        ? '<span class="test-status test-success">Connected</span>'
+        : '<span class="test-status test-error">Failed</span>';
+}
+
+async function testAnthropic() {
+    const statusEl = document.getElementById('anthropic-status');
+    statusEl.innerHTML = '<span class="spinner"></span>';
+    const resp = await fetch('/api/test-anthropic', {method: 'POST'});
+    const data = await resp.json();
+    statusEl.innerHTML = data.success
+        ? '<span class="test-status test-success">Connected</span>'
+        : '<span class="test-status test-error">Failed</span>';
+}
+
+async function testOutlook() {
+    const statusEl = document.getElementById('outlook-status');
+    statusEl.innerHTML = '<span class="spinner"></span>';
+    const resp = await fetch('/api/test-outlook', {method: 'POST'});
+    const data = await resp.json();
+    statusEl.innerHTML = data.success
+        ? '<span class="test-status test-success">Connected</span>'
+        : '<span class="test-status test-error">Failed</span>';
+}
+</script>
+{% endblock %}

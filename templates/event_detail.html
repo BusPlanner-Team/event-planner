@@ -1,0 +1,455 @@
+{% extends "base.html" %}
+{% block title %}{{ event.name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="header-row">
+        <div>
+            <h1>{{ event.name }}</h1>
+            <p>{{ event.event_type|event_type_label }} &middot; {{ event.event_date|et_date }}<span class="tz-label">ET</span>
+            {% if event.start_time and event.end_time %} &middot; {{ event.start_time }} &ndash; {{ event.end_time }}{% endif %}
+            {% if event.location %} &middot; {{ event.location }}{% endif %}
+            {% if event.slack_channel_id %} &middot; <code style="font-size: 0.75rem;">{{ event.slack_channel_id }}</code>{% endif %}
+            {% if event.outlook_event_id %} &middot; <span class="badge badge-role" title="Outlook calendar invite sent">&#128197; Outlook</span>{% endif %}
+            </p>
+        </div>
+        <div class="header-actions">
+            <a href="{{ url_for('event_edit', event_id=event.id) }}" class="btn btn-secondary btn-small">Edit Event</a>
+            <button class="btn btn-danger btn-small" onclick="deleteEvent({{ event.id }}, '{{ event.name|e }}')">Delete Event</button>
+            <span class="status-pill status-{{ event.status }}">{{ event.status|replace('_', ' ')|title }}</span>
+        </div>
+    </div>
+</div>
+
+<!-- Progress Tracker -->
+{% set total_items = stats.total + stats.checklist_total %}
+{% set done_items = stats.completed + stats.checklist_done %}
+{% set pct = (done_items / total_items * 100)|int if total_items > 0 else 0 %}
+<div class="progress-tracker">
+    <h3>Overall Progress</h3>
+    <div class="progress-overall">
+        <div class="progress-overall-bar">
+            <div class="progress-overall-fill {{ 'overdue' if stats.overdue > 0 else ('approaching' if pct < 50 else 'on-track') }}"
+                 style="width: {{ pct }}%"></div>
+        </div>
+        <div class="progress-overall-label">
+            <span>{{ done_items }} of {{ total_items }} items complete</span>
+            <span>{{ pct }}%</span>
+        </div>
+    </div>
+    <div class="progress-categories">
+        <div class="progress-category">
+            <div class="progress-category-label">
+                <span>Tasks</span>
+                <span>{{ stats.completed }}/{{ stats.total }}</span>
+            </div>
+            <div class="progress-category-bar">
+                <div class="progress-category-fill cat-tasks"
+                     style="width: {{ (stats.completed / stats.total * 100)|int if stats.total > 0 else 0 }}%"></div>
+            </div>
+        </div>
+        <div class="progress-category">
+            <div class="progress-category-label">
+                <span>Materials</span>
+                <span>{{ stats.checklist_done }}/{{ stats.checklist_total }}</span>
+            </div>
+            <div class="progress-category-bar">
+                <div class="progress-category-fill cat-materials"
+                     style="width: {{ (stats.checklist_done / stats.checklist_total * 100)|int if stats.checklist_total > 0 else 0 }}%"></div>
+            </div>
+        </div>
+        {% if stats.overdue > 0 %}
+        <div class="progress-category">
+            <div class="progress-category-label">
+                <span>Overdue</span>
+                <span class="badge badge-error">{{ stats.overdue }}</span>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Tab Navigation -->
+<div class="tab-nav">
+    <button class="tab-btn active" data-tab="deliverables">Deliverables</button>
+    <button class="tab-btn" data-tab="materials">Materials ({{ checklist_items|length }})</button>
+    <button class="tab-btn" data-tab="slack">Slack Intel</button>
+</div>
+
+<div class="detail-grid">
+    <!-- Left column -->
+    <div>
+        <!-- TAB: Deliverables -->
+        <div class="tab-panel active" id="tab-deliverables">
+            {% if event.description %}
+            <div class="card" style="margin-bottom: 1rem;">
+                <p>{{ event.description }}</p>
+            </div>
+            {% endif %}
+
+            {% for deliverable in deliverables %}
+            <div class="section">
+                <div class="section-header-row">
+                    <h2>
+                        <span class="type-icon type-{{ deliverable.type }}"></span>
+                        {{ deliverable.label }}
+                        <span class="status-pill status-pill-small status-{{ deliverable.status }}">{{ deliverable.status|replace('_', ' ')|title }}</span>
+                    </h2>
+                    <span class="meta-light">Due: {{ deliverable.due_date|et_date }}<span class="tz-label">ET</span></span>
+                </div>
+
+                {% set tasks = tasks_by_deliverable[deliverable.id] %}
+                {% if tasks %}
+                <div class="leads-table-wrap">
+                    <table class="leads-table">
+                        <thead>
+                            <tr>
+                                <th>Task</th>
+                                <th>Assignee</th>
+                                <th>Due Date</th>
+                                <th>Status</th>
+                                <th>Approval</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for task in tasks %}
+                            <tr>
+                                <td>
+                                    <a href="{{ url_for('task_detail', event_id=event.id, task_id=task.id) }}">
+                                        {{ task.title }}
+                                    </a>
+                                </td>
+                                <td>
+                                    {% if task.assignee_id %}
+                                        {{ task.assignee_name }}
+                                    {% else %}
+                                        <select class="assign-select" data-task-id="{{ task.id }}" onchange="assignTask(this)">
+                                            <option value="">Assign...</option>
+                                            {% for member in team_members %}
+                                            <option value="{{ member.id }}">{{ member.name }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {{ task.due_date|et_date }}
+                                    {% if task.status != 'completed' and task.due_date[:10] < today %}
+                                    <span class="badge badge-error">Overdue</span>
+                                    {% endif %}
+                                </td>
+                                <td><span class="status-pill status-pill-small status-{{ task.status }}">{{ task.status|replace('_', ' ')|title }}</span></td>
+                                <td>
+                                    {% set approval_info = task_approvals.get(task.id) %}
+                                    {% if approval_info %}
+                                    <div class="approval-dots">
+                                        {% for step in approval_info %}
+                                        <span class="approval-dot approval-dot-{{ step.status }}" title="{{ step.step_label }}: {{ step.status }}"></span>
+                                        {% endfor %}
+                                    </div>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="meta-light">No tasks for this deliverable yet.</p>
+                {% endif %}
+            </div>
+            {% else %}
+            <div class="empty-state card">
+                <p>No deliverables. Edit the event to add deliverables.</p>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- TAB: Materials / Checklist -->
+        <div class="tab-panel" id="tab-materials">
+            {% if checklist_items %}
+            <div class="leads-table-wrap">
+                <table class="checklist-table">
+                    <thead>
+                        <tr>
+                            <th>Item</th>
+                            <th>Type</th>
+                            <th>Assignee</th>
+                            <th>Due Date</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in checklist_items %}
+                        <tr>
+                            <td>
+                                <strong>{{ item.name }}</strong>
+                                {% if item.notes %}<br><span class="meta-light">{{ item.notes }}</span>{% endif %}
+                            </td>
+                            <td><span class="item-type-badge item-type-{{ item.item_type }}">{{ item.item_type }}</span></td>
+                            <td>
+                                <select class="checklist-assignee-select"
+                                        onchange="updateChecklistItem({{ item.id }}, 'assignee_id', this.value ? parseInt(this.value) : null)">
+                                    <option value="">Unassigned</option>
+                                    {% for member in team_members %}
+                                    <option value="{{ member.id }}" {% if item.assignee_id == member.id %}selected{% endif %}>{{ member.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td>
+                                {% if item.due_date %}{{ item.due_date|et_date }}{% else %}<span class="meta-light">—</span>{% endif %}
+                            </td>
+                            <td>
+                                <select class="checklist-status-select"
+                                        onchange="updateChecklistItem({{ item.id }}, 'status', this.value)">
+                                    {% for s in ['needed', 'ordered', 'in_progress', 'received', 'completed'] %}
+                                    <option value="{{ s }}" {% if item.status == s %}selected{% endif %}>{{ s|replace('_', ' ')|title }}</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td>
+                                <button class="delete-btn" onclick="deleteChecklistItem({{ item.id }})" title="Remove item">✕</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state card">
+                <p>No materials or checklist items yet. Add items below.</p>
+            </div>
+            {% endif %}
+
+            <!-- Add Checklist Item Form -->
+            <div class="checklist-add-form">
+                <h4 style="font-size: 0.9rem; color: var(--navy); margin-bottom: 0.75rem;">Add Material / Checklist Item</h4>
+                <form onsubmit="addChecklistItem(event, {{ event.id }})">
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 2;">
+                            <label>Item Name</label>
+                            <input type="text" name="name" required placeholder="e.g., Banners, Brochures, Social Graphics">
+                        </div>
+                        <div class="form-group">
+                            <label>Type</label>
+                            <select name="item_type">
+                                <option value="physical">Physical</option>
+                                <option value="digital">Digital</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Assignee</label>
+                            <select name="assignee_id">
+                                <option value="">Unassigned</option>
+                                {% for member in team_members %}
+                                <option value="{{ member.id }}">{{ member.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Due Date</label>
+                            <input type="text" name="due_date" class="flatpickr-date" placeholder="YYYY-MM-DD">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Notes</label>
+                        <textarea name="notes" rows="2" placeholder="Optional notes..."></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-small">Add Item</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- TAB: Slack Intel -->
+        <div class="tab-panel" id="tab-slack">
+            {% if event.slack_channel_id %}
+            <div class="slack-summary-header">
+                <h3 style="font-size: 1rem; color: var(--navy);">
+                    {% if ai_available %}Slack Channel Summary{% else %}Slack Channel Messages{% endif %}
+                </h3>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span id="slack-summary-status"></span>
+                    <button class="btn btn-secondary btn-small" id="pull-messages-btn"
+                            onclick="refreshSlackSummary({{ event.id }}, false)">
+                        Pull Messages
+                    </button>
+                    {% if ai_available %}
+                    <button class="btn btn-primary btn-small" id="refresh-summary-btn"
+                            onclick="refreshSlackSummary({{ event.id }}, true)">
+                        Analyze with AI
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if latest_summary %}
+            <div class="slack-summary-card">
+                {% if latest_summary.ai_powered %}
+                {# AI-powered summary: structured display #}
+                <h4>Latest Summary</h4>
+                <div class="slack-summary-text">{{ latest_summary.summary }}</div>
+
+                {% if latest_summary.decisions %}
+                <div class="slack-summary-section">
+                    <h5>Key Decisions</h5>
+                    <ul>
+                        {% for item in latest_summary.decisions %}
+                        <li>{{ item }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+
+                {% if latest_summary.action_items %}
+                <div class="slack-summary-section">
+                    <h5>Action Items</h5>
+                    <ul>
+                        {% for item in latest_summary.action_items %}
+                        <li>{{ item }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+
+                {% if latest_summary.deadlines %}
+                <div class="slack-summary-section">
+                    <h5>Deadlines Mentioned</h5>
+                    <ul>
+                        {% for item in latest_summary.deadlines %}
+                        <li>{{ item }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+
+                <div class="slack-summary-meta">
+                    {{ latest_summary.message_count }} messages analyzed &middot;
+                    Generated {{ latest_summary.created_at|et_format }}<span class="tz-label">ET</span>
+                </div>
+
+                {% else %}
+                {# Raw messages (no AI): clean display #}
+                <h4>Recent Messages ({{ latest_summary.message_count }})</h4>
+                <div class="slack-messages-raw">
+                    {% for line in latest_summary.summary.split('\n') %}
+                    {% if line.strip() %}
+                    {% set parts = line.split(': ', 1) %}
+                    <div class="slack-message-line">
+                        <span class="slack-msg-author">{{ parts[0] }}</span>
+                        {% if parts|length > 1 %}
+                        <span class="slack-msg-text">{{ parts[1] }}</span>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+                <div class="slack-summary-meta">
+                    {{ latest_summary.message_count }} messages pulled &middot;
+                    {{ latest_summary.created_at|et_format }}<span class="tz-label">ET</span>
+                    {% if not ai_available %}
+                    &middot; <span style="color: var(--muted);">Add an Anthropic API key in Settings for AI-powered summaries</span>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+
+            {% if slack_summaries|length > 1 %}
+            <button class="summary-history-toggle" onclick="toggleSummaryHistory()">
+                Show Previous ({{ slack_summaries|length - 1 }})
+            </button>
+            <div class="summary-history" id="summary-history" style="display: none;">
+                {% for summary in slack_summaries[1:] %}
+                <div class="summary-history-item">
+                    <span class="meta-light">{{ summary.created_at|et_format }} ET — {{ summary.message_count }} messages
+                        {% if summary.ai_powered %}<span class="badge badge-ai">AI</span>{% endif %}
+                    </span>
+                    <p>{{ summary.summary[:200] }}{% if summary.summary|length > 200 %}...{% endif %}</p>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% else %}
+            <div class="empty-state card">
+                <p>No messages yet. Click "Pull Messages" to fetch messages from this event's Slack channel{% if ai_available %}, or "Analyze with AI" for an AI-powered summary{% endif %}.</p>
+            </div>
+            {% endif %}
+
+            {% else %}
+            <div class="slack-no-channel">
+                <p>📡 No Slack channel configured for this event.</p>
+                <p><a href="{{ url_for('event_edit', event_id=event.id) }}" class="btn btn-secondary btn-small">Edit Event</a> to add a Slack channel ID.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Right column: Activity & Stats -->
+    <div>
+        <div class="card" style="margin-bottom: 1rem;">
+            <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem;">Quick Stats</h3>
+            <dl class="info-list">
+                <dt>Total Tasks</dt>
+                <dd>{{ stats.total }}</dd>
+                <dt>Completed</dt>
+                <dd>{{ stats.completed }}</dd>
+                <dt>Overdue</dt>
+                <dd>{% if stats.overdue > 0 %}<span class="badge badge-error">{{ stats.overdue }}</span>{% else %}0{% endif %}</dd>
+                <dt>Materials</dt>
+                <dd>{{ stats.checklist_done }}/{{ stats.checklist_total }}</dd>
+            </dl>
+        </div>
+
+        <div class="card">
+            <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem;">Recent Activity</h3>
+            {% if activity %}
+            <div class="sync-log-list">
+                {% for entry in activity %}
+                <div class="sync-log-item">
+                    <span class="status-dot-inline status-dot-{{ 'success' if entry.action in ('approved', 'completed') else 'scheduled' }}"></span>
+                    <span>
+                        {% if entry.actor_name %}{{ entry.actor_name }}{% else %}System{% endif %}
+                        {{ entry.action }}
+                        <span class="meta-light">{{ entry.created_at|et_format }}<span class="tz-label">ET</span></span>
+                    </span>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="meta-light">No activity yet.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function assignTask(selectEl) {
+    const taskId = selectEl.dataset.taskId;
+    const assigneeId = selectEl.value;
+    if (!assigneeId) return;
+
+    const resp = await fetch(`/api/task/${taskId}/assign`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({assignee_id: parseInt(assigneeId)}),
+    });
+    if (resp.ok) {
+        location.reload();
+    } else {
+        const err = await resp.json();
+        alert(err.error || 'Failed to assign task');
+    }
+}
+
+function toggleSummaryHistory() {
+    const el = document.getElementById('summary-history');
+    if (el) {
+        el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    }
+}
+</script>
+{% endblock %}
