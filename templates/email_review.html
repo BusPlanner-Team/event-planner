@@ -314,7 +314,13 @@ async function postComment() {
         list.appendChild(div);
 
         document.getElementById('comment-body').value = '';
-        showStatus('comment-status', 'Comment posted & sent to Slack!', true);
+        if (data.slack_sent) {
+            showStatus('comment-status', 'Comment posted & sent to Slack!', true);
+        } else if (data.slack_error) {
+            showStatus('comment-status', 'Comment saved. Slack: ' + data.slack_error, false);
+        } else {
+            showStatus('comment-status', 'Comment posted!', true);
+        }
     } else {
         const err = await resp.json();
         showStatus('comment-status', err.error || 'Failed to post comment.', false);

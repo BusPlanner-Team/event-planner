@@ -859,8 +859,7 @@ def api_update_task_status(task_id):
 
     try:
         if new_status == "completed":
-            update_task(conn, task_id, status="completed",
-                        completed_at=datetime.now().isoformat())
+            mark_task_complete(conn, task_id, completed_by_id=None)
         else:
             update_task(conn, task_id, status=new_status)
 
@@ -994,6 +993,8 @@ def api_add_comment(task_id):
     slack = get_slack_client()
     event = get_event(conn, task["event_id"])
     channel = get_notification_channel(event)
+    slack_sent = False
+    slack_error = None
     if slack and channel:
         try:
             task_url = request.host_url.rstrip("/") + url_for(
@@ -1002,12 +1003,20 @@ def api_add_comment(task_id):
             slack.post_email_comment(
                 channel, task["title"], event_name,
                 author["name"], body, task_url)
-        except Exception:
-            pass  # Don't fail the comment if Slack fails
+            slack_sent = True
+        except Exception as e:
+            slack_error = str(e)
+            app.logger.warning("Slack comment notification failed: %s", e)
+    elif not slack:
+        slack_error = "Slack not configured — add bot token in Settings"
+    elif not channel:
+        slack_error = "No Slack channel configured — set in Settings or on the event"
 
     conn.close()
     return jsonify({
         "success": True,
+        "slack_sent": slack_sent,
+        "slack_error": slack_error,
         "comment": {
             "id": comment_id,
             "author_name": author["name"],
@@ -1085,8 +1094,8 @@ def api_assign_task(task_id):
                 task_url(task["event_id"], task_id),
             )
             log_notification(conn, task_id, "assigned")
-        except Exception:
-            pass
+        except Exception as e:
+            app.logger.warning("Slack assign notification failed: %s", e)
 
     # Add assignee to Outlook calendar invite (non-blocking)
     if event and event["outlook_event_id"]:
@@ -1150,8 +1159,8 @@ def api_approve(approval_id):
                     next_step["approver_slack_id"],
                     task_url(task["event_id"], task["id"]),
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            app.logger.warning("Slack approval notification failed: %s", e)
 
     conn.close()
     return jsonify({"success": True, "next_step": dict(next_step) if next_step else None})
@@ -1206,8 +1215,8 @@ def api_reject(approval_id):
                 next_step_label=prev_step["step_label"] if prev_step else None,
                 feedback=feedback,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            app.logger.warning("Slack rejection notification failed: %s", e)
 
     conn.close()
     return jsonify({"success": True})

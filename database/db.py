@@ -561,6 +561,12 @@ def mark_task_complete(conn, task_id, completed_by_id):
         completed_by = ?, updated_at = datetime('now') WHERE id = ?""",
         (completed_by_id, task_id),
     )
+    # Mark all approval steps as approved when task is completed
+    conn.execute(
+        """UPDATE approvals SET status = 'approved', acted_at = datetime('now')
+        WHERE task_id = ? AND status IN ('pending', 'active', 'rejected')""",
+        (task_id,),
+    )
     conn.commit()
 
 
