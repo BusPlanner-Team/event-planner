@@ -206,7 +206,8 @@ def mask_key(value):
 
 
 def task_url(event_id, task_id):
-    return f"http://localhost:5003/event/{event_id}/task/{task_id}"
+    base = request.host_url.rstrip("/")
+    return f"{base}/event/{event_id}/task/{task_id}"
 
 
 # --- Timeline Suggestion (V2: Smart / Current-Date-Aware) ---

@@ -125,16 +125,12 @@
                                     </a>
                                 </td>
                                 <td>
-                                    {% if task.assignee_id %}
-                                        {{ task.assignee_name }}
-                                    {% else %}
-                                        <select class="assign-select" data-task-id="{{ task.id }}" onchange="assignTask(this)">
-                                            <option value="">Assign...</option>
-                                            {% for member in team_members %}
-                                            <option value="{{ member.id }}">{{ member.name }}</option>
-                                            {% endfor %}
-                                        </select>
-                                    {% endif %}
+                                    <select class="assign-select" data-task-id="{{ task.id }}" onchange="assignTask(this)">
+                                        <option value="">Unassigned</option>
+                                        {% for member in team_members %}
+                                        <option value="{{ member.id }}" {% if member.id == task.assignee_id %}selected{% endif %}>{{ member.name }}</option>
+                                        {% endfor %}
+                                    </select>
                                 </td>
                                 <td>
                                     {{ task.due_date|et_date }}

@@ -105,7 +105,20 @@
                 <dt>Assignee</dt>
                 <dd>
                     {% if task.assignee_name %}
-                        {{ task.assignee_name }}
+                        <span id="assignee-display">
+                            {{ task.assignee_name }}
+                            <button class="btn-undo" onclick="showReassign()" title="Reassign" style="margin-left: 0.5rem;">Reassign</button>
+                        </span>
+                        <form id="reassign-form" onsubmit="assignFromDetail(event, {{ task.id }})" style="display: none;">
+                            <select name="assignee_id" required style="padding: 0.3rem; font-size: 0.8rem;">
+                                <option value="">Select...</option>
+                                {% for member in team_members %}
+                                <option value="{{ member.id }}" {% if member.id == task.assignee_id %}selected{% endif %}>{{ member.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit" class="btn btn-primary btn-small">Save</button>
+                            <button type="button" class="btn btn-secondary btn-small" onclick="hideReassign()">Cancel</button>
+                        </form>
                     {% else %}
                         <form onsubmit="assignFromDetail(event, {{ task.id }})" style="display: inline;">
                             <select name="assignee_id" required style="padding: 0.3rem; font-size: 0.8rem;">
@@ -206,6 +219,16 @@ async function assignFromDetail(e, taskId) {
         const err = await resp.json();
         alert(err.error || 'Failed to assign');
     }
+}
+
+function showReassign() {
+    document.getElementById('assignee-display').style.display = 'none';
+    document.getElementById('reassign-form').style.display = 'inline';
+}
+
+function hideReassign() {
+    document.getElementById('assignee-display').style.display = '';
+    document.getElementById('reassign-form').style.display = 'none';
 }
 </script>
 {% endblock %}
