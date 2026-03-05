@@ -45,16 +45,20 @@ class AnthropicClient:
 
         system_prompt = (
             "You are an assistant that analyzes Slack messages from an event-planning team. "
+            "Focus ONLY on messages relevant to the specific event being planned. "
+            "Ignore off-topic chatter, general announcements, or messages about other events. "
             "Given a transcript of messages, produce a JSON object with exactly these keys:\n"
-            "  - \"summary\": a brief paragraph summarizing the conversation.\n"
-            "  - \"decisions\": a list of strings, each a key decision that was made.\n"
-            "  - \"action_items\": a list of strings, each an action item identified.\n"
-            "  - \"deadlines\": a list of strings, each a deadline or date mentioned.\n"
+            "  - \"summary\": a brief paragraph summarizing event-relevant discussion only.\n"
+            "  - \"decisions\": a list of strings, each a key decision made about this event.\n"
+            "  - \"action_items\": a list of strings, each an action item related to this event.\n"
+            "  - \"deadlines\": a list of strings, each a deadline or date mentioned for this event.\n"
+            "If no messages are relevant to the event, return an empty summary and empty lists.\n"
             "Return ONLY valid JSON with no extra text."
         )
 
         user_prompt = (
             f"Event: {event_name}\n\n"
+            f"Analyze ONLY messages related to the \"{event_name}\" event.\n\n"
             f"Slack messages:\n{formatted}"
         )
 

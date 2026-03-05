@@ -27,9 +27,12 @@ from database.db import (
     get_checklist_items,
     get_config,
     get_connection,
+    get_deliverable,
     get_deliverables,
     get_email_copy,
     get_email_copy_for_task,
+    get_email_tracker_data,
+    get_upcoming_tasks,
     get_event,
     get_event_stats,
     get_events,
@@ -48,9 +51,12 @@ from database.db import (
     save_slack_summary,
     set_config,
     update_checklist_item,
+    update_deliverable,
     update_email_copy,
     update_event,
+    update_planned_send_date,
     update_task,
+    update_team_member,
 )
 
 ET = ZoneInfo("America/New_York")
@@ -298,6 +304,80 @@ def suggest_timeline(event_date_str, deliverable_types, email_count=2):
     return timeline, compressed
 
 
+# --- Holiday Check Utility ---
+
+def _check_holiday(check_date):
+    """Check if a date falls on a US or Canadian statutory holiday.
+    Returns the holiday name or None."""
+    year = check_date.year
+    holidays = {
+        # Fixed US / Canadian holidays
+        date(year, 1, 1): "New Year's Day",
+        date(year, 7, 1): "Canada Day",
+        date(year, 7, 4): "Independence Day (US)",
+        date(year, 11, 11): "Remembrance Day / Veterans Day",
+        date(year, 12, 25): "Christmas Day",
+        date(year, 12, 26): "Boxing Day (Canada)",
+    }
+
+    # MLK Day: 3rd Monday of January
+    jan1 = date(year, 1, 1)
+    mlk = date(year, 1, 1) + timedelta(days=(7 - jan1.weekday()) % 7 + 14)
+    holidays[mlk] = "Martin Luther King Jr. Day"
+
+    # Presidents' Day / Family Day (Canada): 3rd Monday of February
+    feb1 = date(year, 2, 1)
+    presidents = feb1 + timedelta(days=(7 - feb1.weekday()) % 7 + 14)
+    holidays[presidents] = "Presidents' Day / Family Day"
+
+    # Victoria Day (Canada): last Monday on or before May 24
+    may24 = date(year, 5, 24)
+    victoria = may24 - timedelta(days=may24.weekday())
+    holidays[victoria] = "Victoria Day (Canada)"
+
+    # Memorial Day (US): last Monday of May
+    may31 = date(year, 5, 31)
+    memorial = may31 - timedelta(days=may31.weekday())
+    holidays[memorial] = "Memorial Day"
+
+    # Labour Day: 1st Monday of September
+    sep1 = date(year, 9, 1)
+    labour = sep1 + timedelta(days=(7 - sep1.weekday()) % 7)
+    holidays[labour] = "Labour Day"
+
+    # Canadian Thanksgiving: 2nd Monday of October
+    oct1 = date(year, 10, 1)
+    cdn_thanks = oct1 + timedelta(days=(7 - oct1.weekday()) % 7 + 7)
+    holidays[cdn_thanks] = "Thanksgiving (Canada)"
+
+    # US Thanksgiving: 4th Thursday of November
+    nov1 = date(year, 11, 1)
+    first_thu = nov1 + timedelta(days=(3 - nov1.weekday() + 7) % 7)
+    us_thanks = first_thu + timedelta(weeks=3)
+    holidays[us_thanks] = "Thanksgiving (US)"
+
+    # Good Friday (Easter-based, Gregorian computus)
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l_val = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l_val) // 451
+    month = (h + l_val - 7 * m + 114) // 31
+    day = ((h + l_val - 7 * m + 114) % 31) + 1
+    easter = date(year, month, day)
+    good_friday = easter - timedelta(days=2)
+    holidays[good_friday] = "Good Friday"
+
+    return holidays.get(check_date)
+
+
 # ============================================================
 # Page Routes
 # ============================================================
@@ -312,6 +392,60 @@ def dashboard():
     conn.close()
     return render_template("dashboard.html", events=events, event_stats=event_stats,
                            active_page="dashboard", today=today_et().isoformat())
+
+
+@app.route("/email-tracker")
+def email_tracker():
+    conn = get_db()
+    tracker_data = get_email_tracker_data(conn)
+    conn.close()
+    return render_template("email_tracker.html",
+                           tracker_data=tracker_data,
+                           active_page="email_tracker",
+                           today=today_et().isoformat())
+
+
+@app.route("/upcoming-tasks")
+def upcoming_tasks():
+    view = request.args.get("view", "week")  # week, next_week, month, all
+    today = today_et()
+    conn = get_db()
+
+    if view == "week":
+        # Current week (Mon-Sun)
+        start = today - timedelta(days=today.weekday())
+        end = start + timedelta(days=6)
+        tasks = get_upcoming_tasks(conn, start_date=start.isoformat(), end_date=end.isoformat())
+        view_label = f"This Week ({start.strftime('%b %d')} – {end.strftime('%b %d')})"
+    elif view == "next_week":
+        start = today - timedelta(days=today.weekday()) + timedelta(weeks=1)
+        end = start + timedelta(days=6)
+        tasks = get_upcoming_tasks(conn, start_date=start.isoformat(), end_date=end.isoformat())
+        view_label = f"Next Week ({start.strftime('%b %d')} – {end.strftime('%b %d')})"
+    elif view == "month":
+        start = today.replace(day=1)
+        if today.month == 12:
+            end = today.replace(year=today.year + 1, month=1, day=1) - timedelta(days=1)
+        else:
+            end = today.replace(month=today.month + 1, day=1) - timedelta(days=1)
+        tasks = get_upcoming_tasks(conn, start_date=start.isoformat(), end_date=end.isoformat())
+        view_label = f"This Month ({today.strftime('%B %Y')})"
+    elif view == "overdue":
+        tasks = get_upcoming_tasks(conn, start_date="2000-01-01", end_date=(today - timedelta(days=1)).isoformat())
+        # Filter to only incomplete tasks
+        tasks = [t for t in tasks if t["status"] != "completed"]
+        view_label = "Overdue Tasks"
+    else:  # all
+        tasks = get_upcoming_tasks(conn)
+        # Filter to only incomplete tasks
+        tasks = [t for t in tasks if t["status"] != "completed"]
+        view_label = "All Upcoming Tasks"
+
+    conn.close()
+    return render_template("upcoming_tasks.html",
+                           tasks=tasks, view=view, view_label=view_label,
+                           active_page="upcoming_tasks",
+                           today=today.isoformat())
 
 
 @app.route("/event/new", methods=["GET", "POST"])
@@ -628,7 +762,190 @@ def api_add_team_member():
 @app.route("/api/team-member/<int:member_id>/delete", methods=["POST"])
 def api_remove_team_member(member_id):
     conn = get_db()
-    deactivate_team_member(conn, member_id)
+    try:
+        deactivate_team_member(conn, member_id)
+        conn.close()
+        return jsonify({"success": True})
+    except Exception as e:
+        conn.close()
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/team-member/<int:member_id>/update", methods=["POST"])
+def api_update_team_member(member_id):
+    data = request.get_json()
+    conn = get_db()
+    member = get_team_member(conn, member_id)
+    if not member:
+        conn.close()
+        return jsonify({"error": "Member not found"}), 404
+    try:
+        update_team_member(
+            conn, member_id,
+            name=data.get("name", member["name"]),
+            email=data.get("email", member["email"]),
+            slack_user_id=data.get("slack_user_id", member["slack_user_id"]),
+            role=data.get("role", member["role"]),
+        )
+        conn.close()
+        return jsonify({"success": True})
+    except Exception as e:
+        conn.close()
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/deliverable/<int:deliverable_id>/update-status", methods=["POST"])
+def api_update_deliverable_status(deliverable_id):
+    """Manually update a deliverable's status."""
+    data = request.get_json()
+    new_status = data.get("status")
+    valid = ("pending", "in_progress", "in_review", "approved", "completed")
+    if new_status not in valid:
+        return jsonify({"error": f"Invalid status. Must be one of: {', '.join(valid)}"}), 400
+
+    conn = get_db()
+    deliverable = get_deliverable(conn, deliverable_id)
+    if not deliverable:
+        conn.close()
+        return jsonify({"error": "Deliverable not found"}), 404
+
+    try:
+        update_deliverable(conn, deliverable_id, status=new_status)
+
+        # If marking deliverable as completed, also mark all its tasks as completed
+        if new_status == "completed":
+            tasks = get_tasks_for_deliverable(conn, deliverable_id)
+            for task in tasks:
+                if task["status"] != "completed":
+                    update_task(conn, task["id"], status="completed",
+                                completed_at=datetime.now().isoformat())
+
+        log_activity(conn, event_id=deliverable["event_id"],
+                     action="status_override",
+                     details={"deliverable": deliverable["label"],
+                              "new_status": new_status})
+        conn.close()
+        return jsonify({"success": True})
+    except Exception as e:
+        conn.close()
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/task/<int:task_id>/update-status", methods=["POST"])
+def api_update_task_status(task_id):
+    """Manually update a task's status."""
+    data = request.get_json()
+    new_status = data.get("status")
+    valid = ("pending", "in_progress", "in_review", "completed")
+    if new_status not in valid:
+        return jsonify({"error": f"Invalid status. Must be one of: {', '.join(valid)}"}), 400
+
+    conn = get_db()
+    task = get_task(conn, task_id)
+    if not task:
+        conn.close()
+        return jsonify({"error": "Task not found"}), 404
+
+    try:
+        if new_status == "completed":
+            update_task(conn, task_id, status="completed",
+                        completed_at=datetime.now().isoformat())
+        else:
+            update_task(conn, task_id, status=new_status)
+
+        # Sync parent deliverable status based on task states
+        tasks = get_tasks_for_deliverable(conn, task["deliverable_id"])
+        statuses = [t["status"] if t["id"] != task_id else new_status for t in tasks]
+        if all(s == "completed" for s in statuses):
+            update_deliverable(conn, task["deliverable_id"], status="completed")
+        elif any(s in ("in_review", "completed") for s in statuses):
+            update_deliverable(conn, task["deliverable_id"], status="in_review")
+        elif any(s == "in_progress" for s in statuses):
+            update_deliverable(conn, task["deliverable_id"], status="in_progress")
+
+        log_activity(conn, event_id=task["event_id"], task_id=task_id,
+                     action="status_override",
+                     details={"task": task["title"], "new_status": new_status})
+        conn.close()
+        return jsonify({"success": True})
+    except Exception as e:
+        conn.close()
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/email-tracker/<int:task_id>/update-send-date", methods=["POST"])
+def api_update_send_date(task_id):
+    data = request.get_json()
+    planned_send_date = data.get("planned_send_date")
+    if not planned_send_date:
+        return jsonify({"error": "planned_send_date is required"}), 400
+
+    conn = get_db()
+    task = get_task(conn, task_id)
+    if not task:
+        conn.close()
+        return jsonify({"error": "Task not found"}), 404
+
+    update_planned_send_date(conn, task_id, planned_send_date)
+
+    # Build warning messages
+    warnings = []
+    try:
+        send_date = date.fromisoformat(planned_send_date)
+        # Check if Tuesday (1) or Thursday (3)
+        if send_date.weekday() not in (1, 3):
+            day_name = send_date.strftime("%A")
+            warnings.append(f"{day_name} is not a typical send day (Tue/Thu)")
+
+        # Check holidays
+        holiday_name = _check_holiday(send_date)
+        if holiday_name:
+            warnings.append(f"This date falls on {holiday_name}")
+    except ValueError:
+        pass
+
+    conn.close()
+    return jsonify({"success": True, "warnings": warnings})
+
+
+@app.route("/api/email-tracker/<int:task_id>/update-status", methods=["POST"])
+def api_update_tracker_status(task_id):
+    """Update a task's approval pipeline from the email tracker.
+    Also syncs the parent deliverable's status."""
+    data = request.get_json()
+    approval_id = data.get("approval_id")
+    action = data.get("action")  # "approve" or "reject"
+    feedback = data.get("feedback", "")
+
+    conn = get_db()
+    task = get_task(conn, task_id)
+    if not task:
+        conn.close()
+        return jsonify({"error": "Task not found"}), 404
+
+    if action == "approve":
+        next_step = approve_step(conn, approval_id)
+        # If all steps done, update deliverable too
+        if not next_step:
+            deliverable = get_deliverable(conn, task["deliverable_id"])
+            if deliverable:
+                update_deliverable(conn, task["deliverable_id"], status="completed")
+        else:
+            # Update deliverable to in_review when approvals are in progress
+            deliverable = get_deliverable(conn, task["deliverable_id"])
+            if deliverable and deliverable["status"] not in ("approved", "completed"):
+                update_deliverable(conn, task["deliverable_id"], status="in_review")
+    elif action == "reject":
+        reject_step(conn, approval_id, feedback)
+        deliverable = get_deliverable(conn, task["deliverable_id"])
+        if deliverable:
+            update_deliverable(conn, task["deliverable_id"], status="in_progress")
+    else:
+        conn.close()
+        return jsonify({"error": "Invalid action"}), 400
+
+    log_activity(conn, event_id=task["event_id"], task_id=task_id,
+                 action=f"tracker_{action}")
     conn.close()
     return jsonify({"success": True})
 
@@ -1055,16 +1372,26 @@ def api_slack_summary(event_id):
             conn.close()
             return jsonify({"error": "No new messages found in the channel"}), 400
 
+        # Filter out bot and system messages — keep only human posts
+        human_messages = [
+            msg for msg in messages
+            if not msg.get("bot_id") and msg.get("subtype") is None
+        ]
+
+        if not human_messages:
+            conn.close()
+            return jsonify({"error": "No human messages found in the channel (only bot/system messages)"}), 400
+
         if ai_client:
-            # AI-powered summary with structured insights
-            result = ai_client.summarize_slack_messages(messages, event["name"])
+            # AI-powered summary with structured insights — only human messages
+            result = ai_client.summarize_slack_messages(human_messages, event["name"])
             save_slack_summary(conn, {
                 "event_id": event_id,
                 "summary": result["summary"],
                 "decisions": result.get("decisions", []),
                 "action_items": result.get("action_items", []),
                 "deadlines": result.get("deadlines", []),
-                "message_count": len(messages),
+                "message_count": len(human_messages),
                 "oldest_ts": messages[-1].get("ts") if messages else None,
                 "latest_ts": messages[0].get("ts") if messages else None,
                 "ai_powered": True,
@@ -1094,12 +1421,7 @@ def api_slack_summary(event_id):
                 text = html_mod.unescape(text)
                 return text.strip()
 
-            # Filter out bot messages — only keep human messages
-            human_messages = [
-                msg for msg in messages
-                if not msg.get("bot_id") and msg.get("subtype") is None
-            ]
-
+            # human_messages already filtered above (before AI check)
             lines = []
             for msg in human_messages:
                 user_id = msg.get("user", "unknown")
@@ -1126,14 +1448,14 @@ def api_slack_summary(event_id):
                 "decisions": [],
                 "action_items": [],
                 "deadlines": [],
-                "message_count": len(messages),
+                "message_count": len(human_messages),
                 "oldest_ts": messages[-1].get("ts") if messages else None,
                 "latest_ts": messages[0].get("ts") if messages else None,
                 "ai_powered": False,
             })
 
         log_activity(conn, event_id=event_id, action="slack_summary",
-                     details={"message_count": len(messages)})
+                     details={"message_count": len(human_messages)})
         conn.close()
         return jsonify({"success": True})
     except Exception as e:

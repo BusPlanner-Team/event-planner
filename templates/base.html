@@ -18,6 +18,8 @@
         </div>
         <div class="nav-links">
             <a href="{{ url_for('dashboard') }}" class="nav-link {% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a>
+            <a href="{{ url_for('email_tracker') }}" class="nav-link {% if active_page == 'email_tracker' %}active{% endif %}">Email Tracker</a>
+            <a href="{{ url_for('upcoming_tasks') }}" class="nav-link {% if active_page == 'upcoming_tasks' %}active{% endif %}">Upcoming Tasks</a>
             <a href="{{ url_for('settings') }}" class="nav-link {% if active_page == 'settings' %}active{% endif %}">Settings</a>
         </div>
     </nav>

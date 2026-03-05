@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Upcoming Tasks{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="header-row">
+        <div>
+            <h1>Upcoming Tasks</h1>
+            <p>{{ view_label }}</p>
+        </div>
+    </div>
+</div>
+
+<!-- Filter Tabs -->
+<div class="tab-nav">
+    <a href="{{ url_for('upcoming_tasks', view='week') }}" class="tab-btn {{ 'active' if view == 'week' }}">This Week</a>
+    <a href="{{ url_for('upcoming_tasks', view='next_week') }}" class="tab-btn {{ 'active' if view == 'next_week' }}">Next Week</a>
+    <a href="{{ url_for('upcoming_tasks', view='month') }}" class="tab-btn {{ 'active' if view == 'month' }}">This Month</a>
+    <a href="{{ url_for('upcoming_tasks', view='overdue') }}" class="tab-btn {{ 'active' if view == 'overdue' }}">Overdue</a>
+    <a href="{{ url_for('upcoming_tasks', view='all') }}" class="tab-btn {{ 'active' if view == 'all' }}">All</a>
+</div>
+
+{% if tasks %}
+<div class="leads-table-wrap">
+    <table class="leads-table" id="upcoming-tasks-table">
+        <thead>
+            <tr>
+                <th>Task</th>
+                <th>Event</th>
+                <th>Type</th>
+                <th>Assignee</th>
+                <th>Due Date</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for task in tasks %}
+            <tr class="{% if task.status != 'completed' and task.due_date[:10] < today %}row-overdue{% endif %}">
+                <td>
+                    <a href="{{ url_for('task_detail', event_id=task.event_id, task_id=task.id) }}">
+                        {{ task.title }}
+                    </a>
+                    <br><span class="meta-light">{{ task.deliverable_label }}</span>
+                </td>
+                <td>
+                    <a href="{{ url_for('event_detail', event_id=task.event_id) }}">{{ task.event_name }}</a>
+                    <br><span class="meta-light">{{ task.event_date|et_date }}</span>
+                </td>
+                <td>
+                    <span class="type-icon type-{{ task.deliverable_type }}"></span>
+                    {{ task.deliverable_type|replace('_', ' ')|title }}
+                </td>
+                <td>{{ task.assignee_name or 'Unassigned' }}</td>
+                <td>
+                    {{ task.due_date|et_date }}
+                    {% if task.status != 'completed' and task.due_date[:10] < today %}
+                    <span class="badge badge-error">Overdue</span>
+                    {% elif task.due_date[:10] == today %}
+                    <span class="badge badge-warning">Due Today</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <select class="status-select status-select-sm status-select-{{ task.status }}"
+                            onchange="updateTaskStatus({{ task.id }}, this.value)">
+                        {% for s in ['pending', 'in_progress', 'in_review', 'completed'] %}
+                        <option value="{{ s }}" {% if task.status == s %}selected{% endif %}>{{ s|replace('_', ' ')|title }}</option>
+                        {% endfor %}
+                    </select>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="upcoming-summary">
+    <span class="meta-light">{{ tasks|length }} task{{ 's' if tasks|length != 1 }} shown</span>
+</div>
+{% else %}
+<div class="empty-state card">
+    <p>No tasks found for this time period.</p>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-primary" style="margin-top: 1rem;">Go to Dashboard</a>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function updateTaskStatus(taskId, newStatus) {
+    const resp = await fetch(`/api/task/${taskId}/update-status`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({status: newStatus}),
+    });
+    if (resp.ok) {
+        location.reload();
+    } else {
+        const err = await resp.json();
+        alert(err.error || 'Failed to update status');
+        location.reload();
+    }
+}
+</script>
+{% endblock %}

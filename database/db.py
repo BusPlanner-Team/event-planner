@@ -23,6 +23,7 @@ def init_db(db_path):
     _migrate_v2(conn)
     _migrate_v3(conn)
     _migrate_v4(conn)
+    _migrate_v5(conn)
 
     conn.close()
 
@@ -175,6 +176,14 @@ def _migrate_v4(conn):
     cols = [row[1] for row in conn.execute("PRAGMA table_info(slack_summaries)").fetchall()]
     if "ai_powered" not in cols:
         conn.execute("ALTER TABLE slack_summaries ADD COLUMN ai_powered INTEGER DEFAULT 1")
+        conn.commit()
+
+
+def _migrate_v5(conn):
+    """Apply V5 schema migrations: planned_send_date for email tracker."""
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(email_copies)").fetchall()]
+    if "planned_send_date" not in cols:
+        conn.execute("ALTER TABLE email_copies ADD COLUMN planned_send_date TEXT")
         conn.commit()
 
 
@@ -443,6 +452,37 @@ def get_incomplete_tasks(conn):
     ).fetchall()
 
 
+def get_upcoming_tasks(conn, days_ahead=None, start_date=None, end_date=None):
+    """Get all tasks across events for the upcoming tasks dashboard.
+
+    Filters:
+    - days_ahead: show tasks due within this many days from today
+    - start_date / end_date: explicit date range (YYYY-MM-DD strings)
+    If no filters, returns all incomplete tasks sorted by due date.
+    """
+    query = """
+        SELECT t.*, d.type as deliverable_type, d.label as deliverable_label,
+               e.name as event_name, e.event_date, e.id as event_id,
+               tm.name as assignee_name
+        FROM tasks t
+        JOIN deliverables d ON t.deliverable_id = d.id
+        JOIN events e ON t.event_id = e.id
+        LEFT JOIN team_members tm ON t.assignee_id = tm.id
+        WHERE e.status != 'cancelled'
+    """
+    params = []
+
+    if start_date and end_date:
+        query += " AND t.due_date >= ? AND t.due_date <= ?"
+        params.extend([start_date, end_date])
+    elif days_ahead is not None:
+        query += " AND t.due_date <= date('now', '+' || ? || ' days')"
+        params.append(str(days_ahead))
+
+    query += " ORDER BY t.due_date ASC, e.name ASC"
+    return conn.execute(query, params).fetchall()
+
+
 def get_events_with_calendar_invite(conn):
     """Get upcoming events that have a calendar_entry deliverable and are not completed/cancelled.
 
@@ -708,7 +748,8 @@ def create_email_copy(conn, data):
 
 def update_email_copy(conn, copy_id, **fields):
     allowed = {"subject_line", "html_content", "plain_text",
-               "mailchimp_campaign_id", "last_pulled_at", "last_pushed_at"}
+               "mailchimp_campaign_id", "last_pulled_at", "last_pushed_at",
+               "planned_send_date"}
     updates = []
     params = []
     for key, value in fields.items():
@@ -732,6 +773,82 @@ def get_email_copy_for_task(conn, task_id):
     return conn.execute(
         "SELECT * FROM email_copies WHERE task_id = ?", (task_id,)
     ).fetchone()
+
+
+def get_email_tracker_data(conn):
+    """Get all active email-type tasks with event, deliverable, email_copies,
+    and approval data for the email tracker dashboard.
+    Excludes completed tasks and cancelled events."""
+    rows = conn.execute(
+        """SELECT
+            t.id as task_id,
+            t.title as task_title,
+            t.due_date as task_due_date,
+            t.status as task_status,
+            t.assignee_id,
+            d.id as deliverable_id,
+            d.label as deliverable_label,
+            d.due_date as deliverable_due_date,
+            d.status as deliverable_status,
+            e.id as event_id,
+            e.name as event_name,
+            e.event_date,
+            ec.id as email_copy_id,
+            ec.subject_line,
+            ec.planned_send_date,
+            tm.name as assignee_name
+        FROM tasks t
+        JOIN deliverables d ON t.deliverable_id = d.id
+        JOIN events e ON t.event_id = e.id
+        LEFT JOIN email_copies ec ON ec.task_id = t.id
+        LEFT JOIN team_members tm ON t.assignee_id = tm.id
+        WHERE d.type IN ('email', 'post_event')
+        AND t.status != 'completed'
+        AND e.status != 'cancelled'
+        ORDER BY COALESCE(ec.planned_send_date, t.due_date) ASC, e.name ASC"""
+    ).fetchall()
+
+    result = []
+    for row in rows:
+        # Only include post_event deliverables that have an email_copy record
+        if row["email_copy_id"] is None:
+            continue
+
+        approvals = conn.execute(
+            """SELECT a.id, a.step_order, a.step_label, a.status, a.approver_id, a.feedback,
+               (SELECT name FROM team_members WHERE id = a.approver_id) as approver_name
+            FROM approvals a WHERE a.task_id = ? ORDER BY a.step_order ASC""",
+            (row["task_id"],)
+        ).fetchall()
+
+        result.append({
+            "task_id": row["task_id"],
+            "task_title": row["task_title"],
+            "task_due_date": row["task_due_date"],
+            "task_status": row["task_status"],
+            "deliverable_id": row["deliverable_id"],
+            "deliverable_label": row["deliverable_label"],
+            "deliverable_status": row["deliverable_status"],
+            "event_id": row["event_id"],
+            "event_name": row["event_name"],
+            "event_date": row["event_date"],
+            "email_copy_id": row["email_copy_id"],
+            "subject_line": row["subject_line"],
+            "planned_send_date": row["planned_send_date"],
+            "assignee_name": row["assignee_name"],
+            "approvals": [dict(a) for a in approvals],
+        })
+
+    return result
+
+
+def update_planned_send_date(conn, task_id, planned_send_date):
+    """Update the planned_send_date on the email_copies record for a task."""
+    conn.execute(
+        "UPDATE email_copies SET planned_send_date = ?, updated_at = datetime('now') WHERE task_id = ?",
+        (planned_send_date, task_id),
+    )
+    conn.commit()
 
 
 # --- Notification Log ---

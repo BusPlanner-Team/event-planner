@@ -93,7 +93,12 @@
                     <h2>
                         <span class="type-icon type-{{ deliverable.type }}"></span>
                         {{ deliverable.label }}
-                        <span class="status-pill status-pill-small status-{{ deliverable.status }}">{{ deliverable.status|replace('_', ' ')|title }}</span>
+                        <select class="status-select status-select-{{ deliverable.status }}"
+                                onchange="updateDeliverableStatus({{ deliverable.id }}, this.value)">
+                            {% for s in ['pending', 'in_progress', 'in_review', 'approved', 'completed'] %}
+                            <option value="{{ s }}" {% if deliverable.status == s %}selected{% endif %}>{{ s|replace('_', ' ')|title }}</option>
+                            {% endfor %}
+                        </select>
                     </h2>
                     <span class="meta-light">Due: {{ deliverable.due_date|et_date }}<span class="tz-label">ET</span></span>
                 </div>
@@ -137,7 +142,14 @@
                                     <span class="badge badge-error">Overdue</span>
                                     {% endif %}
                                 </td>
-                                <td><span class="status-pill status-pill-small status-{{ task.status }}">{{ task.status|replace('_', ' ')|title }}</span></td>
+                                <td>
+                                    <select class="status-select status-select-sm status-select-{{ task.status }}"
+                                            onchange="updateTaskStatus({{ task.id }}, this.value)">
+                                        {% for s in ['pending', 'in_progress', 'in_review', 'completed'] %}
+                                        <option value="{{ s }}" {% if task.status == s %}selected{% endif %}>{{ s|replace('_', ' ')|title }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
                                 <td>
                                     {% set approval_info = task_approvals.get(task.id) %}
                                     {% if approval_info %}
@@ -449,6 +461,36 @@ function toggleSummaryHistory() {
     const el = document.getElementById('summary-history');
     if (el) {
         el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    }
+}
+
+async function updateDeliverableStatus(deliverableId, newStatus) {
+    const resp = await fetch(`/api/deliverable/${deliverableId}/update-status`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({status: newStatus}),
+    });
+    if (resp.ok) {
+        location.reload();
+    } else {
+        const err = await resp.json();
+        alert(err.error || 'Failed to update status');
+        location.reload();
+    }
+}
+
+async function updateTaskStatus(taskId, newStatus) {
+    const resp = await fetch(`/api/task/${taskId}/update-status`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({status: newStatus}),
+    });
+    if (resp.ok) {
+        location.reload();
+    } else {
+        const err = await resp.json();
+        alert(err.error || 'Failed to update status');
+        location.reload();
     }
 }
 </script>

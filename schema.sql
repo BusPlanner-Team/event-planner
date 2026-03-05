@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS email_copies (
     mailchimp_campaign_id TEXT,
     last_pulled_at        TEXT,
     last_pushed_at        TEXT,
+    planned_send_date     TEXT,
     created_at            TEXT DEFAULT (datetime('now')),
     updated_at            TEXT DEFAULT (datetime('now'))
 );

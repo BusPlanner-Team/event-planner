@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}Email Tracker{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="header-row">
+        <div>
+            <h1>Email Tracker</h1>
+            <p>Track all email campaigns across events</p>
+        </div>
+    </div>
+</div>
+
+{% if tracker_data %}
+<div class="leads-table-wrap">
+    <table class="leads-table" id="email-tracker-table">
+        <thead>
+            <tr>
+                <th>Event</th>
+                <th>Email Name</th>
+                <th>Subject Line</th>
+                <th>Planned Send Date</th>
+                <th>Associate Draft</th>
+                <th>Farzan Review</th>
+                <th>Vanessa Review</th>
+                <th>Director Approval</th>
+                <th>CEO Approval</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in tracker_data %}
+            <tr data-task-id="{{ item.task_id }}">
+                <td>
+                    <a href="{{ url_for('event_detail', event_id=item.event_id) }}">{{ item.event_name }}</a>
+                    <br><span class="meta-light">{{ item.event_date|et_date }}</span>
+                </td>
+                <td>
+                    <a href="{{ url_for('task_detail', event_id=item.event_id, task_id=item.task_id) }}">{{ item.deliverable_label }}</a>
+                </td>
+                <td class="email-cell">{{ item.subject_line or '(no subject yet)' }}</td>
+                <td>
+                    <div class="send-date-cell">
+                        <input type="text" class="send-date-input flatpickr-date"
+                               value="{{ item.planned_send_date or item.task_due_date }}"
+                               data-task-id="{{ item.task_id }}"
+                               onchange="updateSendDate({{ item.task_id }}, this.value)">
+                        <div class="send-date-warning" id="warning-{{ item.task_id }}">
+                            {% set send_val = item.planned_send_date or item.task_due_date %}
+                            {% if send_val %}
+                                {% set send_parts = send_val.split('-') %}
+                                {% if send_parts|length == 3 %}
+                                    {# Initial load warnings are computed server-side via JS on page load #}
+                                {% endif %}
+                            {% endif %}
+                        </div>
+                    </div>
+                </td>
+                {% for step in item.approvals %}
+                <td class="approval-cell">
+                    {% if step.status == 'approved' %}
+                    <span class="approval-badge approval-approved" title="{{ step.step_label }}: Approved by {{ step.approver_name or 'Unassigned' }}">&#10003;</span>
+                    {% elif step.status == 'active' %}
+                    <span class="approval-badge approval-active" title="{{ step.step_label }}: Awaiting {{ step.approver_name or 'Unassigned' }}">&#9679;</span>
+                    {% elif step.status == 'rejected' %}
+                    <span class="approval-badge approval-rejected" title="{{ step.step_label }}: Rejected{% if step.feedback %} - {{ step.feedback }}{% endif %}">&#10007;</span>
+                    {% else %}
+                    <span class="approval-badge approval-pending" title="{{ step.step_label }}: Pending">&#8212;</span>
+                    {% endif %}
+                </td>
+                {% endfor %}
+                {# Pad missing columns if approvals < 5 #}
+                {% for i in range(5 - item.approvals|length) %}
+                <td class="approval-cell">
+                    <span class="approval-badge approval-pending">&#8212;</span>
+                </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="empty-state card">
+    <p>No active email campaigns. Email tasks will appear here when events are created with email deliverables.</p>
+    <a href="{{ url_for('event_new') }}" class="btn btn-primary" style="margin-top: 1rem;">+ New Event</a>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function updateSendDate(taskId, dateValue) {
+    const warningEl = document.getElementById(`warning-${taskId}`);
+    warningEl.style.display = 'none';
+    warningEl.innerHTML = '';
+
+    if (!dateValue) return;
+
+    const resp = await fetch(`/api/email-tracker/${taskId}/update-send-date`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({planned_send_date: dateValue}),
+    });
+
+    if (resp.ok) {
+        const data = await resp.json();
+        if (data.warnings && data.warnings.length > 0) {
+            warningEl.innerHTML = data.warnings.map(w =>
+                `<span class="send-date-warn-text">\u26A0 ${w}</span>`
+            ).join('');
+            warningEl.style.display = 'block';
+        }
+    } else {
+        const err = await resp.json();
+        alert(err.error || 'Failed to update send date');
+    }
+}
+
+// Check initial send dates for warnings on page load
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.send-date-input').forEach(el => {
+        const taskId = el.dataset.taskId;
+        const dateValue = el.value;
+        if (dateValue) {
+            // Parse date and check client-side for immediate feedback
+            const d = new Date(dateValue + 'T00:00:00');
+            if (!isNaN(d.getTime())) {
+                const dayOfWeek = d.getDay(); // 0=Sun, 2=Tue, 4=Thu
+                const warningEl = document.getElementById(`warning-${taskId}`);
+                const warnings = [];
+                if (dayOfWeek !== 2 && dayOfWeek !== 4) {
+                    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                    warnings.push(`${days[dayOfWeek]} is not a typical send day (Tue/Thu)`);
+                }
+                if (warnings.length > 0) {
+                    warningEl.innerHTML = warnings.map(w =>
+                        `<span class="send-date-warn-text">\u26A0 ${w}</span>`
+                    ).join('');
+                    warningEl.style.display = 'block';
+                }
+            }
+        }
+    });
+});
+</script>
+{% endblock %}
