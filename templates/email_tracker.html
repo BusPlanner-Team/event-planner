@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Email Tracker{% endblock %}
+{% block container_class %}container-wide{% endblock %}
 
 {% block content %}
 <div class="page-header">
@@ -8,11 +9,18 @@
             <h1>Email Tracker</h1>
             <p>Track all email campaigns across events</p>
         </div>
+        <div class="header-actions">
+            {% if show_completed %}
+            <a href="{{ url_for('email_tracker') }}" class="btn btn-secondary btn-small">Hide Completed</a>
+            {% else %}
+            <a href="{{ url_for('email_tracker', show_completed='true') }}" class="btn btn-secondary btn-small">Show Completed</a>
+            {% endif %}
+        </div>
     </div>
 </div>
 
 {% if tracker_data %}
-<div class="leads-table-wrap">
+<div class="leads-table-wrap email-tracker-wrap">
     <table class="leads-table" id="email-tracker-table">
         <thead>
             <tr>
@@ -20,6 +28,7 @@
                 <th>Email Name</th>
                 <th>Subject Line</th>
                 <th>Planned Send Date</th>
+                <th>Status</th>
                 <th>Associate Draft</th>
                 <th>Farzan Review</th>
                 <th>Vanessa Review</th>
@@ -29,7 +38,7 @@
         </thead>
         <tbody>
             {% for item in tracker_data %}
-            <tr data-task-id="{{ item.task_id }}">
+            <tr data-task-id="{{ item.task_id }}" class="{% if item.task_status == 'completed' %}row-completed{% endif %}">
                 <td>
                     <a href="{{ url_for('event_detail', event_id=item.event_id) }}">{{ item.event_name }}</a>
                     <br><span class="meta-light">{{ item.event_date|et_date }}</span>
@@ -43,41 +52,60 @@
                         <input type="text" class="send-date-input flatpickr-date"
                                value="{{ item.planned_send_date or item.task_due_date }}"
                                data-task-id="{{ item.task_id }}"
-                               onchange="updateSendDate({{ item.task_id }}, this.value)">
-                        <div class="send-date-warning" id="warning-{{ item.task_id }}">
-                            {% set send_val = item.planned_send_date or item.task_due_date %}
-                            {% if send_val %}
-                                {% set send_parts = send_val.split('-') %}
-                                {% if send_parts|length == 3 %}
-                                    {# Initial load warnings are computed server-side via JS on page load #}
-                                {% endif %}
-                            {% endif %}
-                        </div>
+                               onchange="updateSendDate({{ item.task_id }}, this.value)"
+                               {% if item.task_status == 'completed' %}disabled{% endif %}>
+                        <div class="send-date-warning" id="warning-{{ item.task_id }}"></div>
                     </div>
                 </td>
-                {% for step in item.approvals %}
-                <td class="approval-cell">
-                    {% if step.status == 'approved' %}
-                    <span class="approval-badge approval-approved" title="{{ step.step_label }}: Approved by {{ step.approver_name or 'Unassigned' }}">&#10003;</span>
-                    {% elif step.status == 'active' %}
-                    <span class="approval-badge approval-active" title="{{ step.step_label }}: Awaiting {{ step.approver_name or 'Unassigned' }}">&#9679;</span>
-                    {% elif step.status == 'rejected' %}
-                    <span class="approval-badge approval-rejected" title="{{ step.step_label }}: Rejected{% if step.feedback %} - {{ step.feedback }}{% endif %}">&#10007;</span>
-                    {% else %}
-                    <span class="approval-badge approval-pending" title="{{ step.step_label }}: Pending">&#8212;</span>
-                    {% endif %}
+                <td>
+                    <select class="status-select status-select-sm status-select-{{ item.task_status }}"
+                            onchange="updateTrackerTaskStatus({{ item.task_id }}, this.value)">
+                        {% for s in ['pending', 'in_progress', 'in_review', 'completed'] %}
+                        <option value="{{ s }}" {% if item.task_status == s %}selected{% endif %}>{{ s|replace('_', ' ')|title }}</option>
+                        {% endfor %}
+                    </select>
                 </td>
-                {% endfor %}
-                {# Pad missing columns if approvals < 5 #}
-                {% for i in range(5 - item.approvals|length) %}
-                <td class="approval-cell">
-                    <span class="approval-badge approval-pending">&#8212;</span>
-                </td>
-                {% endfor %}
+                {% if item.task_status == 'completed' %}
+                    {# Show all steps as approved when task is completed #}
+                    {% for step in item.approvals %}
+                    <td class="approval-cell">
+                        <span class="approval-badge approval-approved" title="{{ step.step_label }}: Approved">&#10003;</span>
+                    </td>
+                    {% endfor %}
+                    {% for i in range(5 - item.approvals|length) %}
+                    <td class="approval-cell">
+                        <span class="approval-badge approval-approved" title="Approved">&#10003;</span>
+                    </td>
+                    {% endfor %}
+                {% else %}
+                    {% for step in item.approvals %}
+                    <td class="approval-cell">
+                        {% if step.status == 'approved' %}
+                        <span class="approval-badge approval-approved" title="{{ step.step_label }}: Approved by {{ step.approver_name or 'Unassigned' }}">&#10003;</span>
+                        {% elif step.status == 'active' %}
+                        <span class="approval-badge approval-active" title="{{ step.step_label }}: Awaiting {{ step.approver_name or 'Unassigned' }}">&#9679;</span>
+                        {% elif step.status == 'rejected' %}
+                        <span class="approval-badge approval-rejected" title="{{ step.step_label }}: Rejected{% if step.feedback %} - {{ step.feedback }}{% endif %}">&#10007;</span>
+                        {% else %}
+                        <span class="approval-badge approval-pending" title="{{ step.step_label }}: Pending">&#8212;</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                    {# Pad missing columns if approvals < 5 #}
+                    {% for i in range(5 - item.approvals|length) %}
+                    <td class="approval-cell">
+                        <span class="approval-badge approval-pending">&#8212;</span>
+                    </td>
+                    {% endfor %}
+                {% endif %}
             </tr>
             {% endfor %}
         </tbody>
     </table>
+</div>
+
+<div class="upcoming-summary">
+    <span class="meta-light">{{ tracker_data|length }} email{{ 's' if tracker_data|length != 1 }} shown</span>
 </div>
 {% else %}
 <div class="empty-state card">
@@ -116,16 +144,31 @@ async function updateSendDate(taskId, dateValue) {
     }
 }
 
+async function updateTrackerTaskStatus(taskId, newStatus) {
+    const resp = await fetch(`/api/task/${taskId}/update-status`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({status: newStatus}),
+    });
+    if (resp.ok) {
+        location.reload();
+    } else {
+        const err = await resp.json();
+        alert(err.error || 'Failed to update status');
+        location.reload();
+    }
+}
+
 // Check initial send dates for warnings on page load
 document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.send-date-input').forEach(el => {
+        if (el.disabled) return;
         const taskId = el.dataset.taskId;
         const dateValue = el.value;
         if (dateValue) {
-            // Parse date and check client-side for immediate feedback
             const d = new Date(dateValue + 'T00:00:00');
             if (!isNaN(d.getTime())) {
-                const dayOfWeek = d.getDay(); // 0=Sun, 2=Tue, 4=Thu
+                const dayOfWeek = d.getDay();
                 const warningEl = document.getElementById(`warning-${taskId}`);
                 const warnings = [];
                 if (dayOfWeek !== 2 && dayOfWeek !== 4) {

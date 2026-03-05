@@ -400,12 +400,14 @@ def dashboard():
 
 @app.route("/email-tracker")
 def email_tracker():
+    show_completed = request.args.get("show_completed", "false") == "true"
     conn = get_db()
-    tracker_data = get_email_tracker_data(conn)
+    tracker_data = get_email_tracker_data(conn, include_completed=show_completed)
     conn.close()
     return render_template("email_tracker.html",
                            tracker_data=tracker_data,
                            active_page="email_tracker",
+                           show_completed=show_completed,
                            today=today_et().isoformat())
 
 

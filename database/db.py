@@ -775,12 +775,15 @@ def get_email_copy_for_task(conn, task_id):
     ).fetchone()
 
 
-def get_email_tracker_data(conn):
-    """Get all active email-type tasks with event, deliverable, email_copies,
+def get_email_tracker_data(conn, include_completed=False):
+    """Get email-type tasks with event, deliverable, email_copies,
     and approval data for the email tracker dashboard.
-    Excludes completed tasks and cancelled events."""
+    By default excludes completed tasks and cancelled events.
+    Set include_completed=True to include completed tasks (shown as all-approved)."""
+    status_filter = "AND e.status != 'cancelled'" if include_completed else \
+        "AND t.status != 'completed' AND e.status != 'cancelled'"
     rows = conn.execute(
-        """SELECT
+        f"""SELECT
             t.id as task_id,
             t.title as task_title,
             t.due_date as task_due_date,
@@ -803,9 +806,9 @@ def get_email_tracker_data(conn):
         LEFT JOIN email_copies ec ON ec.task_id = t.id
         LEFT JOIN team_members tm ON t.assignee_id = tm.id
         WHERE d.type IN ('email', 'post_event')
-        AND t.status != 'completed'
-        AND e.status != 'cancelled'
-        ORDER BY COALESCE(ec.planned_send_date, t.due_date) ASC, e.name ASC"""
+        {status_filter}
+        ORDER BY t.status = 'completed' ASC,
+                 COALESCE(ec.planned_send_date, t.due_date) ASC, e.name ASC"""
     ).fetchall()
 
     result = []
