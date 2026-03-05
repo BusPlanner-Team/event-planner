@@ -64,6 +64,10 @@ ET = ZoneInfo("America/New_York")
 app = Flask(__name__)
 app.config.from_object(Config)
 
+# Ensure the database directory exists (important for persistent disk on Render)
+import os
+os.makedirs(os.path.dirname(Config.DATABASE_PATH) or ".", exist_ok=True)
+
 init_db(Config.DATABASE_PATH)
 
 
