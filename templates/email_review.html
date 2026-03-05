@@ -95,6 +95,17 @@
         </div>
         {% endif %}
 
+        <!-- Internal Notes -->
+        <div class="card" style="margin-bottom: 1rem;">
+            <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem;">Notes</h3>
+            <div class="form-group" style="margin-bottom: 0.5rem;">
+                <textarea id="internal-notes" rows="4" placeholder="Add context about this email (audience, goals, key details)..."
+                          style="width: 100%; padding: 0.55rem 0.75rem; border: 1px solid var(--border); border-radius: 4px; font-family: inherit; font-size: 0.85rem; resize: vertical;">{{ email_copy.internal_notes if email_copy and email_copy.internal_notes else '' }}</textarea>
+            </div>
+            <button class="btn btn-primary btn-small" onclick="saveNotes()">Save Notes</button>
+            <span id="notes-status" style="margin-left: 0.5rem;"></span>
+        </div>
+
         <!-- Feedback & Comments -->
         <div class="card">
             <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem;">Feedback & Comments</h3>
@@ -324,6 +335,22 @@ async function postComment() {
     } else {
         const err = await resp.json();
         showStatus('comment-status', err.error || 'Failed to post comment.', false);
+    }
+}
+
+async function saveNotes() {
+    const notes = document.getElementById('internal-notes').value;
+    const url = emailCopyId ? `/api/email-copy/${emailCopyId}` : `/api/email-copy/create/{{ task.id }}`;
+    const resp = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({internal_notes: notes}),
+    });
+    if (resp.ok) {
+        showStatus('notes-status', 'Notes saved!', true);
+        if (!emailCopyId) location.reload();
+    } else {
+        showStatus('notes-status', 'Failed to save notes', false);
     }
 }
 

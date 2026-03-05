@@ -25,6 +25,7 @@ def init_db(db_path):
     _migrate_v4(conn)
     _migrate_v5(conn)
     _migrate_v6(conn)
+    _migrate_v7(conn)
 
     conn.close()
 
@@ -205,6 +206,15 @@ def _migrate_v6(conn):
             "CREATE INDEX IF NOT EXISTS idx_email_comments_task ON email_comments(task_id)"
         )
         conn.commit()
+
+
+def _migrate_v7(conn):
+    """Apply V7 schema migrations: internal_notes column on email_copies."""
+    try:
+        conn.execute("ALTER TABLE email_copies ADD COLUMN internal_notes TEXT")
+        conn.commit()
+    except Exception:
+        pass  # Column already exists
 
 
 # --- Config ---
@@ -763,10 +773,11 @@ def reject_step(conn, approval_id, feedback):
 
 def create_email_copy(conn, data):
     cursor = conn.execute(
-        """INSERT INTO email_copies (task_id, deliverable_id, subject_line, html_content, plain_text)
-        VALUES (?, ?, ?, ?, ?)""",
+        """INSERT INTO email_copies (task_id, deliverable_id, subject_line, html_content, plain_text, internal_notes)
+        VALUES (?, ?, ?, ?, ?, ?)""",
         (data["task_id"], data["deliverable_id"],
-         data.get("subject_line"), data.get("html_content"), data.get("plain_text")),
+         data.get("subject_line"), data.get("html_content"), data.get("plain_text"),
+         data.get("internal_notes")),
     )
     conn.commit()
     return cursor.lastrowid
@@ -775,7 +786,7 @@ def create_email_copy(conn, data):
 def update_email_copy(conn, copy_id, **fields):
     allowed = {"subject_line", "html_content", "plain_text",
                "mailchimp_campaign_id", "last_pulled_at", "last_pushed_at",
-               "planned_send_date"}
+               "planned_send_date", "internal_notes"}
     updates = []
     params = []
     for key, value in fields.items():

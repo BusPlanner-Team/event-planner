@@ -1241,6 +1241,8 @@ def api_create_email_copy(task_id):
             updates["subject_line"] = data["subject_line"]
         if "html_content" in data:
             updates["html_content"] = data["html_content"]
+        if "internal_notes" in data:
+            updates["internal_notes"] = data["internal_notes"]
         if data.get("pull") and data.get("campaign_id"):
             mc = get_mailchimp_client()
             if mc:
@@ -1260,12 +1262,15 @@ def api_create_email_copy(task_id):
         conn.close()
         return jsonify({"success": True})
 
-    copy_id = create_email_copy(conn, {
+    copy_data = {
         "task_id": task_id,
         "deliverable_id": task["deliverable_id"],
         "subject_line": data.get("subject_line"),
         "html_content": data.get("html_content"),
-    })
+    }
+    if "internal_notes" in data:
+        copy_data["internal_notes"] = data["internal_notes"]
+    copy_id = create_email_copy(conn, copy_data)
     conn.close()
     return jsonify({"success": True, "id": copy_id})
 
@@ -1279,6 +1284,8 @@ def api_update_email_copy(copy_id):
         updates["subject_line"] = data["subject_line"]
     if "html_content" in data:
         updates["html_content"] = data["html_content"]
+    if "internal_notes" in data:
+        updates["internal_notes"] = data["internal_notes"]
     if updates:
         update_email_copy(conn, copy_id, **updates)
     conn.close()
