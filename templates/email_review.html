@@ -82,7 +82,7 @@
 
         <!-- Approval Status -->
         {% if active_approval and task.status != 'completed' %}
-        <div class="card">
+        <div class="card" style="margin-bottom: 1rem;">
             <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem;">Approval</h3>
             <p style="font-size: 0.85rem; margin-bottom: 0.75rem;">
                 Current Step: <strong>{{ active_approval.step_label }}</strong><br>
@@ -94,6 +94,47 @@
             </div>
         </div>
         {% endif %}
+
+        <!-- Feedback & Comments -->
+        <div class="card">
+            <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem;">Feedback & Comments</h3>
+
+            <div id="comments-list">
+                {% if comments %}
+                {% for comment in comments %}
+                <div class="comment-item">
+                    <div class="comment-header">
+                        <strong class="comment-author">{{ comment.author_name }}</strong>
+                        <span class="badge-role">{{ comment.author_role|title }}</span>
+                        <span class="comment-time">{{ comment.created_at|et_format }}</span>
+                    </div>
+                    <div class="comment-body">{{ comment.body }}</div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <p class="meta-light" id="no-comments-msg">No comments yet. Leave feedback below.</p>
+                {% endif %}
+            </div>
+
+            <div class="comment-form">
+                <div class="form-group" style="margin-bottom: 0.5rem;">
+                    <label style="font-size: 0.8rem;">Your Name</label>
+                    <select id="comment-author" style="width: 100%; padding: 0.4rem 0.6rem; border: 1px solid var(--border); border-radius: 4px; font-family: inherit; font-size: 0.85rem;">
+                        <option value="">Select...</option>
+                        {% for member in team_members %}
+                        <option value="{{ member.id }}">{{ member.name }} ({{ member.role|title }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group" style="margin-bottom: 0.5rem;">
+                    <label style="font-size: 0.8rem;">Comment</label>
+                    <textarea id="comment-body" rows="3" placeholder="Leave feedback on this email..."
+                              style="width: 100%; padding: 0.55rem 0.75rem; border: 1px solid var(--border); border-radius: 4px; font-family: inherit; font-size: 0.85rem; resize: vertical;"></textarea>
+                </div>
+                <button class="btn btn-primary btn-small" onclick="postComment()">Post Comment</button>
+                <span id="comment-status" style="margin-left: 0.5rem;"></span>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -237,6 +278,47 @@ async function rejectFromEmail(approvalId) {
         body: JSON.stringify({feedback}),
     });
     if (resp.ok) location.reload();
+}
+
+async function postComment() {
+    const authorId = document.getElementById('comment-author').value;
+    const body = document.getElementById('comment-body').value.trim();
+    if (!authorId) { alert('Please select your name.'); return; }
+    if (!body) { alert('Please enter a comment.'); return; }
+
+    const resp = await fetch(`/api/task/{{ task.id }}/comment`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({author_id: parseInt(authorId), body: body}),
+    });
+
+    if (resp.ok) {
+        const data = await resp.json();
+        const list = document.getElementById('comments-list');
+        const noMsg = document.getElementById('no-comments-msg');
+        if (noMsg) noMsg.remove();
+
+        const div = document.createElement('div');
+        div.className = 'comment-item';
+        const escapedBody = body.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const role = data.comment.author_role;
+        const roleLabel = role.charAt(0).toUpperCase() + role.slice(1);
+        div.innerHTML = `
+            <div class="comment-header">
+                <strong class="comment-author">${data.comment.author_name}</strong>
+                <span class="badge-role">${roleLabel}</span>
+                <span class="comment-time">${data.comment.created_at}</span>
+            </div>
+            <div class="comment-body">${escapedBody}</div>
+        `;
+        list.appendChild(div);
+
+        document.getElementById('comment-body').value = '';
+        showStatus('comment-status', 'Comment posted & sent to Slack!', true);
+    } else {
+        const err = await resp.json();
+        showStatus('comment-status', err.error || 'Failed to post comment.', false);
+    }
 }
 
 function showStatus(elId, msg, success) {

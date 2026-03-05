@@ -13,6 +13,7 @@ from database.db import (
     create_approval_steps,
     create_checklist_item,
     create_deliverable,
+    create_email_comment,
     create_email_copy,
     create_event,
     create_task,
@@ -29,6 +30,7 @@ from database.db import (
     get_connection,
     get_deliverable,
     get_deliverables,
+    get_email_comments,
     get_email_copy,
     get_email_copy_for_task,
     get_email_tracker_data,
@@ -663,10 +665,13 @@ def email_review(event_id, task_id):
 
     email_copy = get_email_copy_for_task(conn, task_id)
     active_approval = get_active_approval(conn, task_id)
+    comments = get_email_comments(conn, task_id)
+    team_members = get_team_members(conn, active_only=True)
     conn.close()
 
     return render_template("email_review.html", task=task, email_copy=email_copy,
-                           active_approval=active_approval, active_page="dashboard")
+                           active_approval=active_approval, comments=comments,
+                           team_members=team_members, active_page="dashboard")
 
 
 @app.route("/settings", methods=["GET", "POST"])
@@ -954,6 +959,63 @@ def api_update_tracker_status(task_id):
                  action=f"tracker_{action}")
     conn.close()
     return jsonify({"success": True})
+
+
+@app.route("/api/task/<int:task_id>/comment", methods=["POST"])
+def api_add_comment(task_id):
+    """Post a feedback comment on an email task and notify via Slack."""
+    data = request.get_json()
+    body = (data.get("body") or "").strip()
+    author_id = data.get("author_id")
+
+    if not body:
+        return jsonify({"error": "Comment body is required."}), 400
+    if not author_id:
+        return jsonify({"error": "Author is required."}), 400
+
+    conn = get_db()
+    task = get_task(conn, task_id)
+    if not task:
+        conn.close()
+        return jsonify({"error": "Task not found"}), 404
+
+    author = get_team_member(conn, author_id)
+    if not author:
+        conn.close()
+        return jsonify({"error": "Team member not found"}), 404
+
+    comment_id = create_email_comment(conn, task_id, author_id, body)
+
+    log_activity(conn, event_id=task["event_id"], task_id=task_id,
+                 action="email_comment",
+                 details={"author": author["name"], "comment": body[:200]})
+
+    # Send Slack notification
+    slack = get_slack_client()
+    event = get_event(conn, task["event_id"])
+    channel = get_notification_channel(event)
+    if slack and channel:
+        try:
+            task_url = request.host_url.rstrip("/") + url_for(
+                "email_review", event_id=task["event_id"], task_id=task_id)
+            event_name = event["name"] if event else "Unknown Event"
+            slack.post_email_comment(
+                channel, task["title"], event_name,
+                author["name"], body, task_url)
+        except Exception:
+            pass  # Don't fail the comment if Slack fails
+
+    conn.close()
+    return jsonify({
+        "success": True,
+        "comment": {
+            "id": comment_id,
+            "author_name": author["name"],
+            "author_role": author["role"],
+            "body": body,
+            "created_at": "just now",
+        },
+    })
 
 
 @app.route("/api/test-slack", methods=["POST"])

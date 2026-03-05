@@ -24,6 +24,7 @@ def init_db(db_path):
     _migrate_v3(conn)
     _migrate_v4(conn)
     _migrate_v5(conn)
+    _migrate_v6(conn)
 
     conn.close()
 
@@ -184,6 +185,25 @@ def _migrate_v5(conn):
     cols = [row[1] for row in conn.execute("PRAGMA table_info(email_copies)").fetchall()]
     if "planned_send_date" not in cols:
         conn.execute("ALTER TABLE email_copies ADD COLUMN planned_send_date TEXT")
+        conn.commit()
+
+
+def _migrate_v6(conn):
+    """Apply V6 schema migrations: email_comments table for review feedback."""
+    exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='email_comments'"
+    ).fetchone()
+    if not exists:
+        conn.execute("""CREATE TABLE IF NOT EXISTS email_comments (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id    INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            author_id  INTEGER NOT NULL REFERENCES team_members(id),
+            body       TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now'))
+        )""")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_email_comments_task ON email_comments(task_id)"
+        )
         conn.commit()
 
 
@@ -852,6 +872,30 @@ def update_planned_send_date(conn, task_id, planned_send_date):
         (planned_send_date, task_id),
     )
     conn.commit()
+
+
+# --- Email Comments ---
+
+def create_email_comment(conn, task_id, author_id, body):
+    """Create a new comment on an email task."""
+    cursor = conn.execute(
+        "INSERT INTO email_comments (task_id, author_id, body) VALUES (?, ?, ?)",
+        (task_id, author_id, body),
+    )
+    conn.commit()
+    return cursor.lastrowid
+
+
+def get_email_comments(conn, task_id):
+    """Get all comments for a task, ordered oldest first."""
+    return conn.execute(
+        """SELECT ec.*, tm.name as author_name, tm.role as author_role
+        FROM email_comments ec
+        JOIN team_members tm ON ec.author_id = tm.id
+        WHERE ec.task_id = ?
+        ORDER BY ec.created_at ASC""",
+        (task_id,),
+    ).fetchall()
 
 
 # --- Notification Log ---

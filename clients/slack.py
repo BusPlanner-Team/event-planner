@@ -146,6 +146,29 @@ class SlackClient:
         blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": msg}}]
         return self.post_message(channel, text, blocks)
 
+    # --- Email Review Comments ---
+
+    def post_email_comment(self, channel, task_title, event_name,
+                           author_name, comment_body, task_url):
+        """Send a Slack notification when someone leaves feedback on an email."""
+        text = f"New feedback on {task_title} from {author_name}"
+        blocks = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        f":speech_balloon: *New Email Feedback*\n"
+                        f"*{task_title}* for _{event_name}_\n"
+                        f":bust_in_silhouette: From: *{author_name}*\n"
+                        f":memo: \"{comment_body}\"\n"
+                        f":link: <{task_url}|View Email>"
+                    ),
+                },
+            },
+        ]
+        return self.post_message(channel, text, blocks)
+
     # --- V2: Daily Calendar Reminders ---
 
     def post_calendar_reminder(self, channel, event_name, event_date,

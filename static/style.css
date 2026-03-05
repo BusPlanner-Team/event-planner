@@ -999,6 +999,38 @@ span.flatpickr-weekday {
 .row-completed td { color: #666; }
 .row-completed a { color: #666; }
 
+/* Email Review Comments */
+.comment-item {
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border);
+}
+.comment-item:last-child { border-bottom: none; }
+.comment-header {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.25rem;
+    flex-wrap: wrap;
+}
+.comment-author { font-size: 0.83rem; color: var(--navy); }
+.comment-time { font-size: 0.7rem; color: var(--text-light); margin-left: auto; }
+.comment-body {
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--text);
+    white-space: pre-wrap;
+}
+.comment-form {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+}
+.comment-form textarea:focus {
+    outline: none;
+    border-color: var(--gold);
+    box-shadow: 0 0 0 3px rgba(252,186,48,0.15);
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .top-nav { flex-direction: column; height: auto; padding: 0.75rem 1rem; gap: 0.5rem; }

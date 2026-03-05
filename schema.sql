@@ -103,6 +103,16 @@ CREATE TABLE IF NOT EXISTS email_copies (
 
 CREATE INDEX IF NOT EXISTS idx_email_copies_task ON email_copies(task_id);
 
+CREATE TABLE IF NOT EXISTS email_comments (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id    INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    author_id  INTEGER NOT NULL REFERENCES team_members(id),
+    body       TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_comments_task ON email_comments(task_id);
+
 CREATE TABLE IF NOT EXISTS notification_log (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id           INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
